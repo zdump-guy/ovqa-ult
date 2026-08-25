@@ -574,5 +574,29 @@ describe("M6 / M2: Direct JSON Module Import & Compatibility Checker Suite", () 
       expect(quizValidation.success).toBe(true);
       expect(examValidation.success).toBe(true);
     });
+
+    it("processes and validates multiple JSON files concurrently in a batch", () => {
+      const file1 = JSON.stringify(SAMPLE_QUIZ_MODULE_TEMPLATE);
+      const file2 = JSON.stringify(SAMPLE_EXAM_MODULE_TEMPLATE);
+      const file3 = '{"title": "Broken file", "moduleType": "quiz"}';
+
+      const results = [file1, file2, file3].map((text) => validateModuleJson(text));
+
+      expect(results[0].isValid).toBe(true);
+      expect(results[1].isValid).toBe(true);
+      expect(results[2].isValid).toBe(false);
+
+      const validModules = results
+        .filter((r) => r.isValid && r.module)
+        .map((r, idx) => ({
+          ...r.module!,
+          moduleId: `batch_mod_${idx}`,
+          course: "Batch Imported Course",
+        }));
+
+      expect(validModules).toHaveLength(2);
+      expect(validModules[0].moduleType).toBe("quiz");
+      expect(validModules[1].moduleType).toBe("exam");
+    });
   });
 });

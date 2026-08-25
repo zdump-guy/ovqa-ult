@@ -64,14 +64,91 @@ export function getGuestDiagnosticReport(sessionId: string): DiagnosticReport | 
   }
 }
 
-export function saveLocalCustomModule(module: PrepPulseModule): void {
+export function saveLocalCustomModule(
+  module: PrepPulseModule,
+  syncServer: boolean = true
+): void {
   if (typeof window === "undefined") return;
   try {
     const existing = getLocalCustomModules();
     const updated = [module, ...existing.filter((m) => m.moduleId !== module.moduleId)];
     localStorage.setItem(GUEST_CUSTOM_MODULES, JSON.stringify(updated));
+
+    // Background sync to public repository (only in live browser runtime)
+    if (
+      syncServer &&
+      typeof window !== "undefined" &&
+      window.location?.origin &&
+      process.env.NODE_ENV !== "test"
+    ) {
+      const url = `${window.location.origin}/api/modules`;
+      fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(module),
+      }).catch((err) => {
+        if (process.env.NODE_ENV !== "test") {
+          console.warn("Background module sync notice:", err);
+        }
+      });
+    }
   } catch (err) {
     console.warn("Failed to save custom module to localStorage:", err);
+  }
+}
+
+export function saveLocalCustomModules(
+  modules: PrepPulseModule[],
+  syncServer: boolean = true
+): void {
+  if (typeof window === "undefined" || !modules || modules.length === 0) return;
+  try {
+    const existing = getLocalCustomModules();
+    const newIdSet = new Set(modules.map((m) => m.moduleId));
+    const filteredExisting = existing.filter((m) => !m.moduleId || !newIdSet.has(m.moduleId));
+    const updated = [...modules, ...filteredExisting];
+    localStorage.setItem(GUEST_CUSTOM_MODULES, JSON.stringify(updated));
+
+    // Background sync batch to public repository
+    if (
+      syncServer &&
+      typeof window !== "undefined" &&
+      window.location?.origin &&
+      process.env.NODE_ENV !== "test"
+    ) {
+      const url = `${window.location.origin}/api/modules`;
+      fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modules }),
+      }).catch((err) => {
+        if (process.env.NODE_ENV !== "test") {
+          console.warn("Background batch module sync notice:", err);
+        }
+      });
+    }
+  } catch (err) {
+    console.warn("Failed to save custom modules batch to localStorage:", err);
+  }
+}
+
+export async function fetchPublicModules(): Promise<PrepPulseModule[]> {
+  if (
+    typeof window === "undefined" ||
+    !window.location?.origin ||
+    process.env.NODE_ENV === "test"
+  ) {
+    return [];
+  }
+  try {
+    const url = `${window.location.origin}/api/modules`;
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.modules) ? data.modules : [];
+  } catch (err) {
+    console.warn("Could not fetch remote public modules:", err);
+    return [];
   }
 }
 

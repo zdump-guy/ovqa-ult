@@ -28,29 +28,30 @@ export default function HomePage() {
         <div className="flex items-center gap-3">
           <Link
             href="/dashboard"
-            className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-neutral-300 hover:text-white transition-colors"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-neutral-300 hover:text-white hover:bg-[#111111] rounded-xl transition-colors"
           >
             <LayoutDashboard className="w-4 h-4" />
             <span>Dashboard</span>
           </Link>
           <Link
+            href="/create"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-neutral-300 hover:text-white hover:bg-[#111111] rounded-xl transition-colors"
+          >
+            <PlusCircle className="w-4 h-4" />
+            <span>Upload / Create</span>
+          </Link>
+          <Link
             href="/history"
-            className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-neutral-300 hover:text-white transition-colors"
+            className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-neutral-300 hover:text-white hover:bg-[#111111] rounded-xl transition-colors"
           >
             <History className="w-4 h-4" />
             <span>History</span>
           </Link>
           <Link
-            href="/login"
-            className="px-3.5 py-2 text-xs font-semibold text-neutral-300 hover:text-white transition-colors"
+            href="/admin/login"
+            className="px-3 py-1.5 text-xs font-semibold text-neutral-500 hover:text-neutral-300 border border-[#262626] rounded-xl hover:bg-[#111111] transition-colors"
           >
-            Sign In
-          </Link>
-          <Link
-            href="/signup"
-            className="px-4 py-2 text-xs font-bold text-black bg-white hover:bg-neutral-200 active:scale-95 rounded-xl transition-all"
-          >
-            Get Started
+            Admin
           </Link>
         </div>
       </header>

@@ -5,9 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   UploadCloud,
   FileCheck2,
-  FileCode2,
   AlertCircle,
-  CheckCircle2,
   Sparkles,
   Play,
   Layers,
@@ -15,27 +13,42 @@ import {
   Zap,
   BookOpen,
   ArrowRight,
-  RefreshCw,
   Download,
   Check,
   ChevronDown,
   ChevronUp,
   HelpCircle,
   X,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { PrepPulseModule, Question } from "@/types";
 import {
   validateModuleJson,
+  JsonValidationResult,
   SAMPLE_QUIZ_MODULE_TEMPLATE,
   SAMPLE_EXAM_MODULE_TEMPLATE,
 } from "@/components/editor/JsonModuleEditor";
-import { saveLocalCustomModule } from "@/lib/guest-session";
+import {
+  saveLocalCustomModule,
+  saveLocalCustomModules,
+} from "@/lib/guest-session";
+
+export interface UploadedBatchItem {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  rawText: string;
+  validation: JsonValidationResult;
+  courseInput: string;
+}
 
 export interface JsonFileUploadProps {
   initialJson?: string;
   initialFileName?: string;
   defaultCourse?: string;
   onImportSuccess?: (module: PrepPulseModule) => void;
+  onBatchImportSuccess?: (modules: PrepPulseModule[]) => void;
   onSwitchToEditor?: (rawJson: string) => void;
   onCancel?: () => void;
 }
@@ -54,79 +67,88 @@ export function JsonFileUpload({
   initialFileName = "",
   defaultCourse,
   onImportSuccess,
+  onBatchImportSuccess,
   onSwitchToEditor,
   onCancel,
 }: JsonFileUploadProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [rawJsonText, setRawJsonText] = useState<string>(initialJson);
-  const [fileName, setFileName] = useState<string>(initialFileName);
-  const [fileSize, setFileSize] = useState<number>(() =>
-    initialJson ? new Blob([initialJson]).size : 0
-  );
+  const [batchItems, setBatchItems] = useState<UploadedBatchItem[]>([]);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [courseInput, setCourseInput] = useState<string>(defaultCourse || "");
-  const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
-  const [showAllQuestions, setShowAllQuestions] = useState<boolean>(false);
+  const [globalCourseInput, setGlobalCourseInput] = useState<string>(defaultCourse || "");
+  const [expandedModuleId, setExpandedModuleId] = useState<string | null>(null);
   const [copiedTemplate, setCopiedTemplate] = useState<"quiz" | "exam" | null>(null);
 
-  // Sync initialJson if updated from parent
+  // Initialize with initialJson if provided
   useEffect(() => {
-    if (initialJson && initialJson !== rawJsonText) {
-      setRawJsonText(initialJson);
-      setFileSize(new Blob([initialJson]).size);
-      if (initialFileName) {
-        setFileName(initialFileName);
-      }
+    if (initialJson && initialJson.trim()) {
+      const val = validateModuleJson(initialJson);
+      const initialItem: UploadedBatchItem = {
+        id: `file_${Date.now()}_0`,
+        fileName: initialFileName || "uploaded_module.json",
+        fileSize: new Blob([initialJson]).size,
+        rawText: initialJson,
+        validation: val,
+        courseInput:
+          val.module?.course ||
+          val.module?.targetSubject ||
+          defaultCourse ||
+          "General Studies",
+      };
+      setBatchItems([initialItem]);
     }
-  }, [initialJson, initialFileName, rawJsonText]);
+  }, [initialJson, initialFileName, defaultCourse]);
 
-  // Real-time validation against module schema
-  const validation = useMemo(() => {
-    if (!rawJsonText.trim()) return null;
-    return validateModuleJson(rawJsonText);
-  }, [rawJsonText]);
-
-  // Set course from valid module when loaded
-  useEffect(() => {
-    if (validation?.isValid && validation.module) {
-      if (!courseInput) {
-        setCourseInput(
-          validation.module.course ||
-            validation.module.targetSubject ||
-            "General Studies"
-        );
-      }
-    }
-  }, [validation, courseInput]);
-
-  const handleFileProcess = useCallback(async (file: File) => {
-    setIsLoading(true);
-    try {
-      const text = await file.text();
-      setRawJsonText(text);
-      setFileName(file.name);
-      setFileSize(file.size);
-
-      // Auto-extract course if present
+  // Process a list of files concurrently
+  const processFiles = useCallback(
+    async (files: File[]) => {
+      setIsLoading(true);
       try {
-        const parsed = JSON.parse(text);
-        if (parsed.course) {
-          setCourseInput(parsed.course);
-        } else if (parsed.targetSubject) {
-          setCourseInput(parsed.targetSubject);
+        const jsonFiles = files.filter(
+          (f) => f.name.endsWith(".json") || f.type === "application/json"
+        );
+
+        if (jsonFiles.length === 0) {
+          alert("Please upload valid .json files");
+          return;
         }
-      } catch {
-        // Validation will handle syntax errors
+
+        const newItems: UploadedBatchItem[] = await Promise.all(
+          jsonFiles.map(async (file, idx) => {
+            const text = await file.text();
+            const val = validateModuleJson(text);
+
+            let detectedCourse = defaultCourse || "General Studies";
+            try {
+              const parsed = JSON.parse(text);
+              if (parsed.course) detectedCourse = parsed.course;
+              else if (parsed.targetSubject) detectedCourse = parsed.targetSubject;
+            } catch {
+              // ignore
+            }
+
+            return {
+              id: `file_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
+              fileName: file.name,
+              fileSize: file.size,
+              rawText: text,
+              validation: val,
+              courseInput: detectedCourse,
+            };
+          })
+        );
+
+        setBatchItems((prev) => [...prev, ...newItems]);
+      } catch (err) {
+        console.error("Failed to process batch files:", err);
+      } finally {
+        setIsLoading(false);
       }
-    } catch (err: unknown) {
-      console.error("Failed to read JSON file:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+    },
+    [defaultCourse]
+  );
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -146,40 +168,60 @@ export function JsonFileUpload({
     setIsDragging(false);
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0];
-      if (file.name.endsWith(".json") || file.type === "application/json") {
-        handleFileProcess(file);
-      } else {
-        alert("Please upload a valid .json file");
-      }
+      const fileList = Array.from(e.dataTransfer.files);
+      processFiles(fileList);
     }
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      handleFileProcess(file);
+      const fileList = Array.from(e.target.files);
+      processFiles(fileList);
+      e.target.value = "";
     }
   };
 
-  const handleReset = () => {
-    setRawJsonText("");
-    setFileName("");
-    setFileSize(0);
-    setCourseInput("");
+  const handleRemoveItem = (id: string) => {
+    setBatchItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleClearAll = () => {
+    setBatchItems([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+  };
+
+  const handleItemCourseChange = (id: string, newCourse: string) => {
+    setBatchItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, courseInput: newCourse } : item))
+    );
+  };
+
+  const handleApplyGlobalCourse = (courseToApply?: string) => {
+    const target = courseToApply !== undefined ? courseToApply : globalCourseInput;
+    if (!target.trim()) return;
+    setBatchItems((prev) =>
+      prev.map((item) => ({ ...item, courseInput: target.trim() }))
+    );
   };
 
   const handleLoadSample = (type: "quiz" | "exam") => {
     const sample =
       type === "quiz" ? SAMPLE_QUIZ_MODULE_TEMPLATE : SAMPLE_EXAM_MODULE_TEMPLATE;
     const jsonStr = JSON.stringify(sample, null, 2);
-    setRawJsonText(jsonStr);
-    setFileName(type === "quiz" ? "sample_checkpoint_quiz.json" : "sample_mock_exam.json");
-    setFileSize(new Blob([jsonStr]).size);
-    setCourseInput(sample.course);
+    const val = validateModuleJson(jsonStr);
+
+    const newItem: UploadedBatchItem = {
+      id: `sample_${Date.now()}`,
+      fileName: type === "quiz" ? "sample_checkpoint_quiz.json" : "sample_mock_exam.json",
+      fileSize: new Blob([jsonStr]).size,
+      rawText: jsonStr,
+      validation: val,
+      courseInput: sample.course,
+    };
+
+    setBatchItems((prev) => [...prev, newItem]);
   };
 
   const handleDownloadSample = (type: "quiz" | "exam") => {
@@ -200,18 +242,70 @@ export function JsonFileUpload({
     setTimeout(() => setCopiedTemplate(null), 2500);
   };
 
-  const handleLaunchModule = (destination: "player" | "dashboard" = "player") => {
-    if (!validation?.isValid || !validation.module) return;
+  // Convert valid batch items into canonical modules
+  const validBatchModules = useMemo(() => {
+    const validItems = batchItems.filter((item) => item.validation.isValid && item.validation.module);
+    return validItems.map((item) => {
+      const mod = item.validation.module!;
+      const finalCourse =
+        item.courseInput.trim() ||
+        mod.course?.trim() ||
+        mod.targetSubject ||
+        "General Studies";
+      const finalId =
+        mod.moduleId?.trim() && mod.moduleId.length > 5
+          ? mod.moduleId
+          : `mod_json_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
-    const mod = validation.module;
+      return {
+        ...mod,
+        moduleId: finalId,
+        course: finalCourse,
+        createdAt: mod.createdAt || new Date().toISOString(),
+      };
+    });
+  }, [batchItems]);
+
+  const invalidBatchItems = useMemo(() => {
+    return batchItems.filter((item) => !item.validation.isValid);
+  }, [batchItems]);
+
+  // Statistics
+  const batchStats = useMemo(() => {
+    let quizzes = 0;
+    let exams = 0;
+    let totalQuestions = 0;
+
+    for (const m of validBatchModules) {
+      if (m.moduleType === "quiz") quizzes++;
+      else exams++;
+      totalQuestions += m.questions.length;
+    }
+
+    return {
+      total: batchItems.length,
+      validCount: validBatchModules.length,
+      invalidCount: invalidBatchItems.length,
+      quizzes,
+      exams,
+      totalQuestions,
+    };
+  }, [batchItems, validBatchModules, invalidBatchItems]);
+
+  // Single module launch handler
+  const handleLaunchSingleModule = (item: UploadedBatchItem) => {
+    if (!item.validation.isValid || !item.validation.module) return;
+
+    const mod = item.validation.module;
     const finalCourse =
-      courseInput.trim() ||
+      item.courseInput.trim() ||
       mod.course?.trim() ||
       mod.targetSubject ||
       "General Studies";
     const finalModuleId =
-      mod.moduleId?.trim() ||
-      `mod_json_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      mod.moduleId?.trim() && mod.moduleId.length > 5
+        ? mod.moduleId
+        : `mod_json_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
     const finalModule: PrepPulseModule = {
       ...mod,
@@ -220,53 +314,56 @@ export function JsonFileUpload({
       createdAt: mod.createdAt || new Date().toISOString(),
     };
 
-    // Save to guest / local storage
-    saveLocalCustomModule(finalModule);
+    saveLocalCustomModule(finalModule, true);
 
     if (onImportSuccess) {
       onImportSuccess(finalModule);
       return;
     }
 
-    if (destination === "dashboard") {
-      router.push("/dashboard");
-    } else {
+    const targetUrl =
+      finalModule.moduleType === "quiz"
+        ? `/quiz/${finalModuleId}`
+        : `/exam/${finalModuleId}`;
+    router.push(targetUrl);
+  };
+
+  // Batch import all valid modules
+  const handleImportAll = (destination: "dashboard" | "first_player" = "dashboard") => {
+    if (validBatchModules.length === 0) return;
+
+    // Save locally and sync to central cloud database
+    saveLocalCustomModules(validBatchModules, true);
+
+    if (onBatchImportSuccess) {
+      onBatchImportSuccess(validBatchModules);
+      return;
+    }
+
+    if (destination === "first_player") {
+      const first = validBatchModules[0];
       const targetUrl =
-        finalModule.moduleType === "quiz"
-          ? `/quiz/${finalModuleId}`
-          : `/exam/${finalModuleId}`;
+        first.moduleType === "quiz" ? `/quiz/${first.moduleId}` : `/exam/${first.moduleId}`;
       router.push(targetUrl);
+    } else {
+      router.push("/dashboard");
     }
   };
 
-  // Extract question type stats
-  const questionTypeStats = useMemo(() => {
-    if (!validation?.isValid || !validation.module?.questions) return null;
-    const counts = { multiple_choice: 0, multi_select: 0, true_false: 0 };
-    const difficultyCounts = { easy: 0, medium: 0, hard: 0 };
-
-    for (const q of validation.module.questions) {
-      if (q.type in counts) counts[q.type as keyof typeof counts]++;
-      if (q.difficulty in difficultyCounts)
-        difficultyCounts[q.difficulty as keyof typeof difficultyCounts]++;
-    }
-
-    return { counts, difficultyCounts };
-  }, [validation]);
-
   return (
     <div className="w-full flex flex-col space-y-6 text-white font-sans">
-      {/* Hidden File Input */}
+      {/* Hidden Multi-File Input */}
       <input
         ref={fileInputRef}
         type="file"
+        multiple
         accept=".json,application/json"
         className="hidden"
         onChange={handleFileInputChange}
       />
 
-      {/* No file loaded state: Big Dropzone */}
-      {!rawJsonText.trim() ? (
+      {/* No files loaded: Main Multi-File Dropzone */}
+      {batchItems.length === 0 ? (
         <div className="space-y-6">
           <div
             onDragOver={handleDragOver}
@@ -279,7 +376,6 @@ export function JsonFileUpload({
                 : "border-[#333333] hover:border-neutral-400 bg-black/60 hover:bg-[#0d0d0d]"
             }`}
           >
-            {/* Background Glow */}
             <div className="absolute inset-0 bg-gradient-to-b from-white/[0.03] to-transparent pointer-events-none" />
 
             <div className="w-16 h-16 rounded-3xl bg-[#111111] border border-[#333333] flex items-center justify-center text-white mb-4 group-hover:scale-110 transition-transform shadow-lg">
@@ -287,10 +383,10 @@ export function JsonFileUpload({
             </div>
 
             <h3 className="text-lg sm:text-xl font-extrabold text-white mb-1.5">
-              Upload Quiz or Exam JSON File
+              Upload JSON Files (Single or Multiple)
             </h3>
             <p className="text-sm text-neutral-400 max-w-md mb-6 leading-relaxed">
-              Drag and drop your <code className="text-neutral-200 font-mono px-1.5 py-0.5 rounded bg-[#1a1a1a]">.json</code> file here, or click to browse from your device. No code pasting required.
+              Drag and drop one or multiple <code className="text-neutral-200 font-mono px-1.5 py-0.5 rounded bg-[#1a1a1a]">.json</code> quiz or exam files. Modules will be validated and universally accessible.
             </p>
 
             <button
@@ -303,18 +399,18 @@ export function JsonFileUpload({
               ) : (
                 <FileCheck2 className="w-4 h-4" />
               )}
-              <span>{isLoading ? "Reading JSON..." : "Select .JSON File"}</span>
+              <span>{isLoading ? "Processing Files..." : "Select .JSON Files"}</span>
             </button>
           </div>
 
-          {/* Preset Helper Cards */}
+          {/* Sample Templates Helper */}
           <div className="p-5 rounded-2xl bg-[#0a0a0a] border border-[#262626] space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-xs font-bold text-neutral-300 uppercase tracking-wider">
                 <Sparkles className="w-4 h-4 text-white" /> Quick Test Samples & Templates
               </div>
               <span className="text-[11px] text-neutral-500">
-                Load ready-made files or download schema templates
+                Test with sample files or download schema templates
               </span>
             </div>
 
@@ -386,46 +482,31 @@ export function JsonFileUpload({
           </div>
         </div>
       ) : (
-        /* File is loaded / parsed: Show clean, code-free visual status & preview */
+        /* Files Loaded: Batch Overview & Action Hub */
         <div className="space-y-6 animate-in fade-in duration-200">
-          {/* Top File Meta Bar */}
-          <div className="p-4 rounded-2xl bg-[#0a0a0a] border border-[#262626] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* Top Batch Summary Bar */}
+          <div className="p-4 rounded-2xl bg-[#0a0a0a] border border-[#262626] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div
-                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
-                  validation?.isValid
-                    ? "bg-emerald-950/50 border-emerald-800 text-emerald-400"
-                    : "bg-red-950/50 border-red-800 text-red-400"
-                }`}
-              >
-                {validation?.isValid ? (
-                  <FileCheck2 className="w-5 h-5" />
-                ) : (
-                  <AlertCircle className="w-5 h-5" />
-                )}
+              <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-black font-black shrink-0">
+                <FileCheck2 className="w-5 h-5 text-black" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-white">
-                    {fileName || "uploaded_module.json"}
+                  <h3 className="text-sm font-bold text-white">
+                    {batchStats.total} {batchStats.total === 1 ? "File Uploaded" : "Files Uploaded"}
+                  </h3>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-950/60 border border-emerald-800 text-emerald-400 font-mono">
+                    ✓ {batchStats.validCount} Ready
                   </span>
-                  <span className="text-xs text-neutral-500 font-mono">
-                    ({(fileSize / 1024).toFixed(1)} KB)
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  {validation?.isValid ? (
-                    <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-400 font-mono">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Valid {validation.module?.moduleType === "quiz" ? "Quiz" : "Exam"} Module Definition
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-xs font-bold text-red-400 font-mono">
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      {validation?.statusText || "Validation Error"}
+                  {batchStats.invalidCount > 0 && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-red-950/60 border border-red-800 text-red-400 font-mono">
+                      ✕ {batchStats.invalidCount} with Errors
                     </span>
                   )}
                 </div>
+                <p className="text-xs text-neutral-400 mt-0.5">
+                  {batchStats.quizzes} Quizzes • {batchStats.exams} Mock Exams • {batchStats.totalQuestions} Total Questions
+                </p>
               </div>
             </div>
 
@@ -435,455 +516,281 @@ export function JsonFileUpload({
                 onClick={() => fileInputRef.current?.click()}
                 className="px-3 py-1.5 rounded-xl bg-black border border-[#333333] hover:border-neutral-400 text-xs font-semibold text-white flex items-center gap-1.5 transition-colors cursor-pointer"
               >
-                <RefreshCw className="w-3.5 h-3.5" /> Replace File
+                <Plus className="w-3.5 h-3.5" /> Add More JSON Files
               </button>
               <button
                 type="button"
-                onClick={handleReset}
+                onClick={handleClearAll}
                 className="p-2 rounded-xl bg-black border border-[#333333] hover:border-red-500 hover:text-red-400 text-neutral-400 transition-colors cursor-pointer"
-                title="Remove File"
+                title="Clear All Files"
               >
-                <X className="w-4 h-4" />
+                <Trash2 className="w-4 h-4" />
               </button>
             </div>
           </div>
 
-          {/* Validation Error Banner (if file is invalid) */}
-          {!validation?.isValid && (
-            <div className="p-5 rounded-2xl bg-red-950/30 border border-red-900/60 text-white space-y-3">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <h4 className="text-sm font-bold text-red-300">
-                    Incompatible JSON File Format
-                  </h4>
-                  <p className="text-xs text-neutral-300">
-                    The uploaded JSON file has formatting or schema issues that prevent it from being launched:
-                  </p>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-black/60 border border-red-900/40 space-y-1.5 max-h-48 overflow-y-auto font-mono text-xs text-red-200">
-                {validation?.errors.map((err, idx) => (
-                  <div key={idx} className="flex items-start gap-2">
-                    <span className="text-red-500">•</span>
-                    <span>{err}</span>
-                  </div>
+          {/* Batch Course Categorization Bar */}
+          <div className="p-4 rounded-2xl bg-[#0a0a0a] border border-[#262626] space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <label className="text-xs font-bold uppercase tracking-wider text-neutral-300 flex items-center gap-1.5">
+                <Tag className="w-3.5 h-3.5 text-white" /> Batch Assign Course Category
+              </label>
+              <span className="text-[11px] text-neutral-500 font-mono">
+                Applies course tag to all files in this upload batch
+              </span>
+            </div>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+              <input
+                type="text"
+                value={globalCourseInput}
+                onChange={(e) => setGlobalCourseInput(e.target.value)}
+                placeholder="e.g. CS 401: Deep Learning"
+                className="flex-1 bg-black border border-[#333333] rounded-xl px-3.5 py-2 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-white font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => handleApplyGlobalCourse()}
+                className="px-3.5 py-2 rounded-xl bg-white text-black font-bold text-xs hover:bg-neutral-200 transition-colors cursor-pointer shrink-0"
+              >
+                Apply to All
+              </button>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {SUGGESTED_COURSES.slice(0, 3).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => {
+                      setGlobalCourseInput(c);
+                      handleApplyGlobalCourse(c);
+                    }}
+                    className="px-2.5 py-1 text-[11px] rounded-lg bg-black text-neutral-400 border border-[#333333] hover:text-white hover:border-neutral-500 transition-colors cursor-pointer"
+                  >
+                    {c.split(":")[0]}
+                  </button>
                 ))}
               </div>
-
-              <div className="flex flex-wrap items-center gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-2 rounded-xl bg-white text-black font-bold text-xs hover:bg-neutral-200 transition-colors cursor-pointer"
-                >
-                  Upload a Different JSON File
-                </button>
-                {onSwitchToEditor && (
-                  <button
-                    type="button"
-                    onClick={() => onSwitchToEditor(rawJsonText)}
-                    className="px-4 py-2 rounded-xl bg-black border border-[#333333] text-neutral-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <FileCode2 className="w-3.5 h-3.5" /> Inspect in Raw Code Editor
-                  </button>
-                )}
-              </div>
             </div>
-          )}
+          </div>
 
-          {/* Valid Module Details & Visual Launch Card */}
-          {validation?.isValid && validation.module && (
-            <div className="space-y-6">
-              {/* Main Module Summary Card */}
-              <div className="p-6 md:p-8 rounded-3xl bg-[#0a0a0a] border border-[#262626] space-y-6">
-                {/* Header with Title & Badges */}
-                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-6 border-b border-[#262626]">
-                  <div className="flex items-start gap-3.5">
-                    <div className="w-12 h-12 rounded-2xl bg-[#111111] border border-[#333333] flex items-center justify-center text-white shrink-0">
-                      {validation.module.moduleType === "quiz" ? (
-                        <Zap className="w-6 h-6 fill-white text-white" />
-                      ) : (
-                        <BookOpen className="w-6 h-6 text-white" />
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-[#111111] border border-[#333333] text-white font-mono flex items-center gap-1.5">
-                          {validation.module.moduleType === "quiz" ? (
-                            <>
-                              <Zap className="w-3 h-3 fill-white text-white" /> Checkpoint Quiz
-                            </>
+          {/* Module List Cards */}
+          <div className="space-y-4">
+            {batchItems.map((item, index) => {
+              const isValid = item.validation.isValid && item.validation.module;
+              const isExpanded = expandedModuleId === item.id;
+              const mod = item.validation.module;
+
+              return (
+                <div
+                  key={item.id}
+                  className={`rounded-3xl border transition-all overflow-hidden ${
+                    isValid
+                      ? "bg-[#0a0a0a] border-[#262626] hover:border-neutral-500"
+                      : "bg-red-950/20 border-red-900/60"
+                  }`}
+                >
+                  {/* Card Header */}
+                  <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3.5">
+                      <div
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0 border ${
+                          isValid
+                            ? "bg-[#111111] border-[#333333]"
+                            : "bg-red-950/60 border-red-800 text-red-400"
+                        }`}
+                      >
+                        {isValid ? (
+                          mod?.moduleType === "quiz" ? (
+                            <Zap className="w-5 h-5 fill-white text-white" />
                           ) : (
-                            <>
-                              <BookOpen className="w-3 h-3 text-white" /> Mock Exam
-                            </>
+                            <BookOpen className="w-5 h-5 text-white" />
+                          )
+                        ) : (
+                          <AlertCircle className="w-5 h-5" />
+                        )}
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs text-neutral-500 font-mono">
+                            #{index + 1} {item.fileName} ({(item.fileSize / 1024).toFixed(1)} KB)
+                          </span>
+                          {isValid ? (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[#111111] border border-[#333333] text-neutral-300 font-mono">
+                              {mod?.moduleType === "quiz" ? "Checkpoint Quiz" : "Mock Exam"}
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-red-950/60 border border-red-800 text-red-300 font-mono">
+                              Invalid Schema
+                            </span>
                           )}
-                        </span>
-                        <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-950/60 border border-emerald-800 text-emerald-400 font-mono">
-                          Ready to Launch
+                        </div>
+
+                        <h4 className="text-base font-bold text-white">
+                          {isValid ? mod?.title : "Schema Validation Failed"}
+                        </h4>
+
+                        {isValid && (
+                          <p className="text-xs text-neutral-400">
+                            Course:{" "}
+                            <input
+                              type="text"
+                              value={item.courseInput}
+                              onChange={(e) => handleItemCourseChange(item.id, e.target.value)}
+                              className="bg-black border border-[#333333] rounded px-2 py-0.5 text-xs text-white font-mono inline-block w-48 focus:outline-none focus:border-white"
+                            />{" "}
+                            • Subject: <span className="text-neutral-200">{mod?.targetSubject}</span>{" "}
+                            • {mod?.questions.length} questions
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Actions on Card Header */}
+                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                      {isValid && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedModuleId(isExpanded ? null : item.id)}
+                            className="px-3 py-1.5 rounded-xl bg-black border border-[#333333] text-xs font-semibold text-neutral-300 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <span>Questions</span>
+                            {isExpanded ? (
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            ) : (
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleLaunchSingleModule(item)}
+                            className="px-4 py-2 rounded-xl bg-white text-black font-bold text-xs hover:bg-neutral-200 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                          >
+                            <Play className="w-3.5 h-3.5 fill-black text-black" />
+                            <span>Launch</span>
+                          </button>
+                        </>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveItem(item.id)}
+                        className="p-2 rounded-xl bg-black border border-[#333333] hover:border-red-500 hover:text-red-400 text-neutral-500 transition-colors cursor-pointer"
+                        title="Remove file"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Validation Error List (if invalid) */}
+                  {!isValid && (
+                    <div className="px-5 pb-5 pt-2 border-t border-red-900/40 space-y-2">
+                      <p className="text-xs font-semibold text-red-300">
+                        Issues detected in {item.fileName}:
+                      </p>
+                      <div className="p-3 rounded-xl bg-black/60 border border-red-900/40 space-y-1 font-mono text-xs text-red-200 max-h-36 overflow-y-auto">
+                        {item.validation.errors.map((err, errIdx) => (
+                          <div key={errIdx} className="flex items-start gap-1.5">
+                            <span className="text-red-500">•</span>
+                            <span>{err}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Question Preview Accordion */}
+                  {isValid && isExpanded && mod && (
+                    <div className="px-5 pb-5 pt-3 border-t border-[#1f1f1f] space-y-3 bg-black/40 animate-in fade-in">
+                      <div className="flex items-center justify-between text-xs font-bold text-neutral-300">
+                        <span className="flex items-center gap-1.5">
+                          <HelpCircle className="w-4 h-4 text-white" /> Questions in this file ({mod.questions.length})
                         </span>
                       </div>
 
-                      <h2 className="text-xl md:text-2xl font-extrabold text-white">
-                        {validation.module.title}
-                      </h2>
-
-                      <p className="text-xs text-neutral-400 font-medium">
-                        Subject:{" "}
-                        <span className="text-neutral-200 font-semibold">
-                          {validation.module.targetSubject}
-                        </span>
-                        {validation.module.description && (
-                          <span className="block text-neutral-400 mt-1">
-                            {validation.module.description}
-                          </span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Primary Launch Action in Header */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => handleLaunchModule("player")}
-                      className="px-6 py-3 rounded-2xl bg-white text-black font-bold text-sm hover:bg-neutral-200 active:scale-95 transition-all shadow-md flex items-center gap-2 cursor-pointer"
-                    >
-                      <Play className="w-4 h-4 fill-black text-black" />
-                      <span>
-                        Launch {validation.module.moduleType === "quiz" ? "Quiz" : "Exam"}
-                      </span>
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Module Course Assignment */}
-                <div className="p-4 rounded-2xl bg-black border border-[#262626] space-y-2.5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                    <label className="text-xs font-bold uppercase tracking-wider text-neutral-300 flex items-center gap-1.5">
-                      <Tag className="w-3.5 h-3.5 text-white" /> Course Library Category
-                    </label>
-                    <span className="text-[11px] text-neutral-500 font-mono">
-                      Groups this module in your Dashboard library
-                    </span>
-                  </div>
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                    <input
-                      type="text"
-                      value={courseInput}
-                      onChange={(e) => setCourseInput(e.target.value)}
-                      placeholder="e.g. CS 401: Deep Learning"
-                      className="flex-1 bg-[#0a0a0a] border border-[#333333] rounded-xl px-3.5 py-2 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-white font-mono"
-                    />
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {SUGGESTED_COURSES.slice(0, 3).map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => setCourseInput(c)}
-                          className={`px-2.5 py-1 text-[11px] rounded-lg border transition-colors cursor-pointer ${
-                            courseInput === c
-                              ? "bg-white text-black font-bold border-white"
-                              : "bg-[#0a0a0a] text-neutral-400 border-[#333333] hover:text-white hover:border-neutral-500"
-                          }`}
-                        >
-                          {c.split(":")[0]}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Metric Badges Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-                  <div className="p-3.5 rounded-2xl bg-black border border-[#262626]">
-                    <span className="block text-[11px] font-semibold text-neutral-500 uppercase tracking-wider">
-                      Questions
-                    </span>
-                    <span className="text-lg font-bold text-white font-mono">
-                      {validation.module.questions.length}
-                    </span>
-                    <span className="block text-[10px] text-neutral-400 mt-0.5">
-                      {questionTypeStats?.counts.multiple_choice || 0} MCQ •{" "}
-                      {questionTypeStats?.counts.multi_select || 0} Multi •{" "}
-                      {questionTypeStats?.counts.true_false || 0} T/F
-                    </span>
-                  </div>
-
-                  <div className="p-3.5 rounded-2xl bg-black border border-[#262626]">
-                    <span className="block text-[11px] font-semibold text-neutral-500 uppercase tracking-wider">
-                      Format Mode
-                    </span>
-                    <span className="text-lg font-bold text-white capitalize">
-                      {validation.module.moduleType}
-                    </span>
-                    <span className="block text-[10px] text-neutral-400 mt-0.5">
-                      {validation.module.moduleType === "quiz"
-                        ? "Rapid Cognitive Recall"
-                        : "Realistic Simulation"}
-                    </span>
-                  </div>
-
-                  <div className="p-3.5 rounded-2xl bg-black border border-[#262626]">
-                    <span className="block text-[11px] font-semibold text-neutral-500 uppercase tracking-wider">
-                      {validation.module.moduleType === "quiz"
-                        ? "Checkpoints"
-                        : "Duration"}
-                    </span>
-                    <span className="text-lg font-bold text-white font-mono">
-                      {validation.module.moduleType === "quiz"
-                        ? Math.ceil(
-                            validation.module.questions.length /
-                              (validation.module.config.quizConfig
-                                ?.checkpointInterval || 5)
-                          )
-                        : `${
-                            validation.module.config.examConfig
-                              ?.totalDurationMinutes || 60
-                          }m`}
-                    </span>
-                    <span className="block text-[10px] text-neutral-400 mt-0.5">
-                      {validation.module.moduleType === "quiz"
-                        ? `${
-                            validation.module.config.quizConfig
-                              ?.timePerQuestionSeconds || 15
-                          }s per question`
-                        : "Timed Mock Exam"}
-                    </span>
-                  </div>
-
-                  <div className="p-3.5 rounded-2xl bg-black border border-[#262626]">
-                    <span className="block text-[11px] font-semibold text-neutral-500 uppercase tracking-wider">
-                      Pass Requirement
-                    </span>
-                    <span className="text-lg font-bold text-white font-mono">
-                      {validation.module.moduleType === "quiz"
-                        ? `${Math.round(
-                            (validation.module.config.quizConfig
-                              ?.checkpointPassThreshold || 0.8) * 100
-                          )}%`
-                        : `${
-                            validation.module.config.examConfig
-                              ?.passingScorePercentage || 60
-                          }%`}
-                    </span>
-                    <span className="block text-[10px] text-neutral-400 mt-0.5">
-                      Required to clear
-                    </span>
-                  </div>
-                </div>
-
-                {/* Question Preview Accordion */}
-                <div className="border-t border-[#262626] pt-6 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <HelpCircle className="w-4 h-4 text-white" />
-                      <h3 className="text-sm font-bold text-white">
-                        Question Roster Preview ({validation.module.questions.length})
-                      </h3>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowAllQuestions(!showAllQuestions)}
-                      className="text-xs font-semibold text-neutral-400 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
-                    >
-                      <span>
-                        {showAllQuestions
-                          ? "Collapse List"
-                          : `View All ${validation.module.questions.length} Questions`}
-                      </span>
-                      {showAllQuestions ? (
-                        <ChevronUp className="w-4 h-4" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4" />
-                      )}
-                    </button>
-                  </div>
-
-                  {/* Question Cards List */}
-                  <div className="space-y-3">
-                    {(showAllQuestions
-                      ? validation.module.questions
-                      : validation.module.questions.slice(0, 3)
-                    ).map((q: Question, idx: number) => {
-                      const isExpanded =
-                        expandedQuestionId === q.id || showAllQuestions;
-                      return (
-                        <div
-                          key={q.id || idx}
-                          className="p-4 rounded-2xl bg-black border border-[#262626] space-y-3 transition-colors hover:border-[#3a3a3a]"
-                        >
+                      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                        {mod.questions.map((q: Question, qIdx: number) => (
                           <div
-                            onClick={() =>
-                              setExpandedQuestionId(
-                                expandedQuestionId === q.id ? null : q.id
-                              )
-                            }
-                            className="flex items-start justify-between gap-3 cursor-pointer"
+                            key={q.id || qIdx}
+                            className="p-3 rounded-xl bg-black border border-[#262626] space-y-1.5 text-xs"
                           >
-                            <div className="flex items-start gap-2.5">
-                              <span className="w-6 h-6 rounded-lg bg-[#141414] border border-[#333333] flex items-center justify-center text-xs font-bold text-neutral-300 shrink-0 font-mono">
-                                {idx + 1}
+                            <div className="flex items-center gap-2">
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[#141414] text-neutral-400">
+                                Q{qIdx + 1}
                               </span>
-                              <div className="space-y-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[#141414] border border-[#333333] text-neutral-300 font-mono">
-                                    {q.type.replace("_", " ")}
-                                  </span>
-                                  <span
-                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase font-mono ${
-                                      q.difficulty === "easy"
-                                        ? "text-emerald-400 bg-emerald-950/40 border border-emerald-800/60"
-                                        : q.difficulty === "medium"
-                                        ? "text-amber-400 bg-amber-950/40 border border-amber-800/60"
-                                        : "text-red-400 bg-red-950/40 border border-red-800/60"
-                                    }`}
-                                  >
-                                    {q.difficulty}
-                                  </span>
-                                  {q.checkpoint && (
-                                    <span className="text-[10px] text-neutral-500 font-mono">
-                                      Checkpoint {q.checkpoint}
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-xs sm:text-sm font-semibold text-white leading-snug">
-                                  {q.prompt}
-                                </p>
-                              </div>
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono capitalize bg-[#141414] text-neutral-300">
+                                {q.type.replace("_", " ")}
+                              </span>
+                              <span className="text-[10px] font-mono text-neutral-500">
+                                {q.difficulty}
+                              </span>
+                              <span className="font-semibold text-white truncate flex-1">
+                                {q.prompt}
+                              </span>
                             </div>
-
-                            <button
-                              type="button"
-                              className="text-neutral-500 hover:text-white p-1"
-                            >
-                              {isExpanded ? (
-                                <ChevronUp className="w-4 h-4" />
-                              ) : (
-                                <ChevronDown className="w-4 h-4" />
-                              )}
-                            </button>
                           </div>
-
-                          {/* Options Breakdown */}
-                          {isExpanded && (
-                            <div className="pl-8 pt-2 space-y-2 border-t border-[#1a1a1a]">
-                              <div className="grid grid-cols-1 gap-1.5">
-                                {q.options.map((opt) => {
-                                  const isCorrect = q.correctOptionIds.includes(
-                                    opt.id
-                                  );
-                                  return (
-                                    <div
-                                      key={opt.id}
-                                      className={`p-2.5 rounded-xl text-xs flex items-center justify-between gap-2 border ${
-                                        isCorrect
-                                          ? "bg-emerald-950/30 border-emerald-800/70 text-white font-medium"
-                                          : "bg-[#0d0d0d] border-[#222222] text-neutral-400"
-                                      }`}
-                                    >
-                                      <div className="flex items-center gap-2">
-                                        <span
-                                          className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold font-mono ${
-                                            isCorrect
-                                              ? "bg-emerald-500 text-black"
-                                              : "bg-[#1f1f1f] text-neutral-400"
-                                          }`}
-                                        >
-                                          {opt.id.replace("opt_", "")}
-                                        </span>
-                                        <span>{opt.text}</span>
-                                      </div>
-                                      {isCorrect && (
-                                        <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 font-mono shrink-0">
-                                          <Check className="w-3 h-3" /> Correct Answer
-                                        </span>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-
-                              {q.explanation && (
-                                <div className="p-2.5 rounded-xl bg-[#111111] border border-[#222222] text-xs text-neutral-300">
-                                  <span className="font-bold text-neutral-400 block mb-0.5">
-                                    Explanation:
-                                  </span>
-                                  {q.explanation}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-
-                    {!showAllQuestions &&
-                      validation.module.questions.length > 3 && (
-                        <button
-                          type="button"
-                          onClick={() => setShowAllQuestions(true)}
-                          className="w-full py-2.5 rounded-xl bg-black border border-[#262626] hover:border-neutral-500 text-xs font-semibold text-neutral-300 hover:text-white transition-colors text-center cursor-pointer"
-                        >
-                          + {validation.module.questions.length - 3} more questions in this file (Click to preview all)
-                        </button>
-                      )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Bottom Action Footer */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-[#0a0a0a] border border-[#262626]">
-                <div className="text-xs text-neutral-400">
-                  {onSwitchToEditor && (
-                    <button
-                      type="button"
-                      onClick={() => onSwitchToEditor(rawJsonText)}
-                      className="text-neutral-400 hover:text-white underline text-xs transition-colors cursor-pointer"
-                    >
-                      Need to edit raw JSON text? Switch to code editor
-                    </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
+              );
+            })}
+          </div>
 
-                <div className="flex items-center gap-3">
-                  {onCancel && (
-                    <button
-                      type="button"
-                      onClick={onCancel}
-                      className="px-4 py-3 rounded-xl border border-[#333333] bg-black text-xs font-bold text-neutral-300 hover:text-white hover:bg-[#111111] transition-colors cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => handleLaunchModule("dashboard")}
-                    className="px-4 py-3 rounded-xl border border-[#333333] bg-black text-xs font-bold text-neutral-300 hover:text-white hover:bg-[#111111] transition-colors cursor-pointer flex items-center gap-1.5"
-                  >
-                    <Layers className="w-4 h-4" />
-                    <span>Save to Library</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleLaunchModule("player")}
-                    className="px-6 py-3 rounded-xl bg-white text-black font-bold text-xs sm:text-sm hover:bg-neutral-200 active:scale-95 transition-all shadow-md flex items-center gap-2 cursor-pointer"
-                  >
-                    <Play className="w-4 h-4 fill-black text-black" />
-                    <span>
-                      Launch {validation.module.moduleType === "quiz" ? "Quiz" : "Exam"} Now
-                    </span>
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
+          {/* Bottom Action Hub */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-3xl bg-[#0a0a0a] border border-[#262626]">
+            <div className="text-xs text-neutral-400">
+              {onSwitchToEditor && batchItems.length === 1 && (
+                <button
+                  type="button"
+                  onClick={() => onSwitchToEditor(batchItems[0].rawText)}
+                  className="text-neutral-400 hover:text-white underline text-xs transition-colors cursor-pointer"
+                >
+                  Need to edit raw JSON text? Open in code editor
+                </button>
+              )}
             </div>
-          )}
+
+            <div className="flex flex-wrap items-center gap-3">
+              {onCancel && (
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="px-4 py-3 rounded-xl border border-[#333333] bg-black text-xs font-bold text-neutral-300 hover:text-white hover:bg-[#111111] transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+              )}
+
+              <button
+                type="button"
+                disabled={validBatchModules.length === 0}
+                onClick={() => handleImportAll("dashboard")}
+                className="px-5 py-3 rounded-xl border border-[#333333] bg-black text-xs font-bold text-white hover:bg-[#111111] hover:border-neutral-400 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-40 disabled:pointer-events-none"
+              >
+                <Layers className="w-4 h-4" />
+                <span>Save All ({validBatchModules.length}) to Library</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={validBatchModules.length === 0}
+                onClick={() => handleImportAll("first_player")}
+                className="px-6 py-3 rounded-xl bg-white text-black font-bold text-xs sm:text-sm hover:bg-neutral-200 active:scale-95 transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-40 disabled:pointer-events-none"
+              >
+                <Play className="w-4 h-4 fill-black text-black" />
+                <span>
+                  {validBatchModules.length > 1
+                    ? `Import All & Launch First ${validBatchModules[0]?.moduleType === "quiz" ? "Quiz" : "Exam"}`
+                    : `Launch ${validBatchModules[0]?.moduleType === "quiz" ? "Quiz" : "Exam"} Now`}
+                </span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -36,23 +36,49 @@ export default function QuizPlayerPage({ params }: QuizPlayerPageProps) {
   const [loading, setLoading] = useState(true);
   const [soundMuted, setSoundMuted] = useState(false);
 
-  // Load module from demo pool or local custom modules
+  // Load module from demo pool, local custom modules, or remote API
   useEffect(() => {
-    let foundModule: PrepPulseModule | undefined = getDemoModule(moduleId);
+    let isMounted = true;
 
-    if (!foundModule) {
-      const localModules = getLocalCustomModules();
-      foundModule = localModules.find((m) => m.moduleId === moduleId);
+    async function loadModule() {
+      let foundModule: PrepPulseModule | undefined = getDemoModule(moduleId);
+
+      if (!foundModule) {
+        const localModules = getLocalCustomModules();
+        foundModule = localModules.find((m) => m.moduleId === moduleId);
+      }
+
+      // If not found locally, fetch from remote server API
+      if (!foundModule && !moduleId.startsWith("demo-") && typeof window !== "undefined" && window.location?.origin) {
+        try {
+          const res = await fetch(`${window.location.origin}/api/modules/${moduleId}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.module) {
+              foundModule = data.module;
+            }
+          }
+        } catch {
+          // ignore network error, proceed to fallback
+        }
+      }
+
+      if (!foundModule && moduleId.startsWith("demo-")) {
+        foundModule = DEMO_QUIZ_MODULE;
+      }
+
+      if (isMounted) {
+        setModule(foundModule || DEMO_QUIZ_MODULE);
+        setLoading(false);
+        setSoundMuted(isMuted());
+      }
     }
 
-    if (!foundModule && moduleId.startsWith("demo-")) {
-      foundModule = DEMO_QUIZ_MODULE;
-    }
+    loadModule();
 
-    // Default fallback to DEMO_QUIZ_MODULE
-    setModule(foundModule || DEMO_QUIZ_MODULE);
-    setLoading(false);
-    setSoundMuted(isMuted());
+    return () => {
+      isMounted = false;
+    };
   }, [moduleId]);
 
   if (loading || !module) {

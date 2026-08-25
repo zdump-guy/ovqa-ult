@@ -9,6 +9,7 @@ import {
   deleteLocalCustomModule,
   deleteLocalCustomModules,
   updateLocalCustomModulesCourse,
+  fetchPublicModules,
 } from "@/lib/guest-session";
 import {
   Zap,
@@ -43,18 +44,37 @@ export default function DashboardPage() {
   const [modulesToDelete, setModulesToDelete] = useState<PrepPulseModule[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Load modules from demo repository and localStorage
-  const refreshModules = useCallback(() => {
+  // Load modules from demo repository, localStorage, and public server API
+  const refreshModules = useCallback(async () => {
     const customModules = getLocalCustomModules();
-    const combined = [...ALL_DEMO_MODULES];
+    const combinedMap = new Map<string, PrepPulseModule>();
 
-    for (const customMod of customModules) {
-      if (!combined.some((m) => m.moduleId === customMod.moduleId)) {
-        combined.push(customMod);
+    // 1. Add demo modules
+    ALL_DEMO_MODULES.forEach((m) => {
+      if (m.moduleId) combinedMap.set(m.moduleId, m);
+    });
+
+    // 2. Add local custom modules
+    customModules.forEach((m) => {
+      if (m.moduleId) combinedMap.set(m.moduleId, m);
+    });
+
+    setModules(Array.from(combinedMap.values()));
+
+    // 3. Fetch server public modules asynchronously
+    try {
+      const publicServerModules = await fetchPublicModules();
+      if (publicServerModules && publicServerModules.length > 0) {
+        publicServerModules.forEach((m) => {
+          if (m.moduleId && !combinedMap.has(m.moduleId)) {
+            combinedMap.set(m.moduleId, m);
+          }
+        });
+        setModules(Array.from(combinedMap.values()));
       }
+    } catch {
+      // Offline fallback
     }
-
-    setModules(combined);
   }, []);
 
   useEffect(() => {

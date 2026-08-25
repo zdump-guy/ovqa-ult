@@ -44,29 +44,23 @@ export async function updateSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  // Protected routes requiring authentication
-  const isProtectedPath =
-    pathname.startsWith("/dashboard") ||
-    pathname.startsWith("/create") ||
-    pathname.startsWith("/history") ||
-    pathname.startsWith("/settings");
+  // Admin routes requiring admin authentication (except admin login)
+  const isAdminProtectedPath =
+    pathname.startsWith("/admin") && pathname !== "/admin/login";
 
-  // Auth routes (redirect to dashboard if already authenticated)
-  const isAuthPath =
-    pathname === "/login" ||
-    pathname === "/signup" ||
-    pathname.startsWith("/(auth)");
+  // Admin auth path (redirect to /admin if already authenticated)
+  const isAdminAuthPath = pathname === "/admin/login";
 
-  if (!user && isProtectedPath) {
+  if (!user && isAdminProtectedPath) {
     const url = request.nextUrl.clone();
-    url.pathname = "/login";
+    url.pathname = "/admin/login";
     url.searchParams.set("redirect", pathname);
     return NextResponse.redirect(url);
   }
 
-  if (user && isAuthPath) {
+  if (user && isAdminAuthPath) {
     const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
+    url.pathname = "/admin";
     return NextResponse.redirect(url);
   }
 

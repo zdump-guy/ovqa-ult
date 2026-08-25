@@ -32,22 +32,48 @@ export default function ExamPlayerPage({ params }: ExamPlayerPageProps) {
   const [module, setModule] = useState<PrepPulseModule | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Load module from demo pool, local custom modules, or fallback
+  // Load module from demo pool, local custom modules, or remote server API
   useEffect(() => {
-    let foundModule: PrepPulseModule | undefined = getDemoModule(moduleId);
+    let isMounted = true;
 
-    if (!foundModule) {
-      const localModules = getLocalCustomModules();
-      foundModule = localModules.find((m) => m.moduleId === moduleId);
+    async function loadModule() {
+      let foundModule: PrepPulseModule | undefined = getDemoModule(moduleId);
+
+      if (!foundModule) {
+        const localModules = getLocalCustomModules();
+        foundModule = localModules.find((m) => m.moduleId === moduleId);
+      }
+
+      // If not found locally, fetch from remote server API
+      if (!foundModule && !moduleId.startsWith("demo-") && typeof window !== "undefined" && window.location?.origin) {
+        try {
+          const res = await fetch(`${window.location.origin}/api/modules/${moduleId}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.module) {
+              foundModule = data.module;
+            }
+          }
+        } catch {
+          // ignore network error, proceed to fallback
+        }
+      }
+
+      if (!foundModule && moduleId.startsWith("demo-")) {
+        foundModule = DEMO_EXAM_MODULE;
+      }
+
+      if (isMounted) {
+        setModule(foundModule || DEMO_EXAM_MODULE);
+        setLoading(false);
+      }
     }
 
-    if (!foundModule && moduleId.startsWith("demo-")) {
-      foundModule = DEMO_EXAM_MODULE;
-    }
+    loadModule();
 
-    // Default fallback to DEMO_EXAM_MODULE
-    setModule(foundModule || DEMO_EXAM_MODULE);
-    setLoading(false);
+    return () => {
+      isMounted = false;
+    };
   }, [moduleId]);
 
   if (loading || !module) {

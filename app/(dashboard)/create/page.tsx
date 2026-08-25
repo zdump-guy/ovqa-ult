@@ -315,6 +315,9 @@ export default function CreateModulePage() {
                 setDirectJsonText(json);
                 setCreationMode("direct_json");
               }}
+              onBatchImportSuccess={() => {
+                router.push("/dashboard");
+              }}
               onImportSuccess={(mod) => {
                 setGeneratedModule(mod);
                 const targetUrl =
