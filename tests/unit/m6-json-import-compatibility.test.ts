@@ -508,4 +508,71 @@ describe("M6 / M2: Direct JSON Module Import & Compatibility Checker Suite", () 
       expect(getLocalCustomModules().length).toBe(0);
     });
   });
+
+  /* =========================================================================
+     5. Direct JSON File Upload & Code-Free Ingestion
+     ========================================================================= */
+  describe("Direct JSON File Upload Workflow (No Code Pasting)", () => {
+    it("handles mock .json file content for Quiz module seamlessly", () => {
+      const fileContent = JSON.stringify(SAMPLE_QUIZ_MODULE_TEMPLATE);
+      const validation = validateModuleJson(fileContent);
+
+      expect(validation.isValid).toBe(true);
+      expect(validation.module).toBeDefined();
+      expect(validation.module?.moduleType).toBe("quiz");
+      expect(validation.module?.questions.length).toBe(5);
+
+      // Verify saving directly without opening an editor
+      const finalModule: PrepPulseModule = {
+        ...validation.module!,
+        moduleId: `mod_upload_${Date.now()}`,
+        course: validation.module!.course || "General Studies",
+        createdAt: new Date().toISOString(),
+      };
+
+      saveLocalCustomModule(finalModule);
+      const retrieved = getLocalCustomModules();
+      expect(retrieved.length).toBe(1);
+      expect(retrieved[0].title).toBe(SAMPLE_QUIZ_MODULE_TEMPLATE.title);
+    });
+
+    it("handles mock .json file content for Exam module seamlessly", () => {
+      const fileContent = JSON.stringify(SAMPLE_EXAM_MODULE_TEMPLATE);
+      const validation = validateModuleJson(fileContent);
+
+      expect(validation.isValid).toBe(true);
+      expect(validation.module).toBeDefined();
+      expect(validation.module?.moduleType).toBe("exam");
+      expect(validation.module?.config.examConfig?.totalDurationMinutes).toBe(60);
+
+      const finalModule: PrepPulseModule = {
+        ...validation.module!,
+        moduleId: "exam_upload_test",
+        course: "CS 501: Distributed Systems",
+      };
+
+      saveLocalCustomModule(finalModule);
+      const stored = getLocalCustomModules().find((m) => m.moduleId === "exam_upload_test");
+      expect(stored).toBeDefined();
+      expect(stored?.title).toBe(SAMPLE_EXAM_MODULE_TEMPLATE.title);
+    });
+
+    it("provides human-readable errors when uploaded .json file is invalid", () => {
+      const malformedJsonFile = '{"title": "Missing questions array", "moduleType": "quiz"}';
+      const validation = validateModuleJson(malformedJsonFile);
+
+      expect(validation.isValid).toBe(false);
+      expect(validation.status).toBe("incompatible");
+      expect(validation.errors.length).toBeGreaterThan(0);
+      expect(validation.errors.some((e) => e.toLowerCase().includes("questions") || e.toLowerCase().includes("targetsubject"))).toBe(true);
+    });
+
+    it("validates that both sample templates conform 100% to ModuleZodSchema", () => {
+      const quizValidation = ModuleZodSchema.safeParse(SAMPLE_QUIZ_MODULE_TEMPLATE);
+      const examValidation = ModuleZodSchema.safeParse(SAMPLE_EXAM_MODULE_TEMPLATE);
+
+      expect(quizValidation.success).toBe(true);
+      expect(examValidation.success).toBe(true);
+    });
+  });
 });

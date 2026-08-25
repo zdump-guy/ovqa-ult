@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -13,22 +13,41 @@ import {
   Edit3,
   Play,
   FileCode2,
+  UploadCloud,
 } from "lucide-react";
 import { PdfDropzone, GenerateModuleParams } from "@/components/upload/PdfDropzone";
 import { ModuleConfigDrawer } from "@/components/upload/ModuleConfigDrawer";
+import { JsonFileUpload } from "@/components/upload/JsonFileUpload";
 import { JsonModuleEditor } from "@/components/editor/JsonModuleEditor";
 import { PrepPulseModule } from "@/types";
 import { saveLocalCustomModule } from "@/lib/guest-session";
 
 export default function CreateModulePage() {
   const router = useRouter();
-  const [creationMode, setCreationMode] = useState<"ai" | "direct_json">("ai");
+  const [creationMode, setCreationMode] = useState<"upload_json" | "ai" | "direct_json">("upload_json");
+  const [uploadedJsonText, setUploadedJsonText] = useState<string>("");
+  const [uploadedJsonFileName, setUploadedJsonFileName] = useState<string>("");
   const [directJsonText, setDirectJsonText] = useState<string>("");
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [generatedModule, setGeneratedModule] = useState<PrepPulseModule | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
   const [isMockResult, setIsMockResult] = useState<boolean>(false);
+
+  // Check URL params on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const mode = params.get("mode");
+      if (mode === "ai") {
+        setCreationMode("ai");
+      } else if (mode === "editor" || mode === "direct_json") {
+        setCreationMode("direct_json");
+      } else if (mode === "upload" || mode === "upload_json" || mode === "json") {
+        setCreationMode("upload_json");
+      }
+    }
+  }, []);
 
   const handleGenerate = async (params: GenerateModuleParams) => {
     setIsGenerating(true);
@@ -94,10 +113,16 @@ export default function CreateModulePage() {
 
           <div className="flex items-center gap-3">
             <Link
+              href="/dashboard"
+              className="text-xs font-semibold text-neutral-400 hover:text-white px-3 py-1.5 rounded-lg hover:bg-[#111111] transition-colors"
+            >
+              Dashboard
+            </Link>
+            <Link
               href="/"
               className="text-xs font-semibold text-neutral-400 hover:text-white px-3 py-1.5 rounded-lg hover:bg-[#111111] transition-colors"
             >
-              Back to Home
+              Home
             </Link>
           </div>
         </div>
@@ -108,33 +133,54 @@ export default function CreateModulePage() {
         {/* Page Hero */}
         <div className="text-center space-y-3">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#111111] border border-[#333333] text-neutral-300 text-xs font-bold uppercase tracking-wider">
-            {creationMode === "ai" ? (
+            {creationMode === "upload_json" ? (
+              <>
+                <UploadCloud className="w-4 h-4 text-white" /> Direct JSON File Upload
+              </>
+            ) : creationMode === "ai" ? (
               <>
                 <BrainCircuit className="w-4 h-4 text-white" /> AI Document Ingestion
               </>
             ) : (
               <>
-                <FileCode2 className="w-4 h-4 text-white" /> Direct JSON Import & Checker
+                <FileCode2 className="w-4 h-4 text-white" /> Direct JSON Code Editor
               </>
             )}
           </div>
           <h1 className="text-3xl md:text-5xl font-extrabold text-white tracking-tight">
-            {creationMode === "ai" ? "Create an AI-Powered Module" : "Direct JSON Module Ingestion"}
+            {creationMode === "upload_json"
+              ? "Upload Quiz or Exam JSON"
+              : creationMode === "ai"
+              ? "Create an AI-Powered Module"
+              : "Raw JSON Module Editor"}
           </h1>
           <p className="text-neutral-400 text-sm md:text-base max-w-2xl mx-auto">
-            {creationMode === "ai"
+            {creationMode === "upload_json"
+              ? "Upload a .json quiz or mock exam file to instantly validate, review question details, and launch practice sessions without manual code editing."
+              : creationMode === "ai"
               ? "Upload course slides, syllabus, or lecture notes. Our engine converts them into structured 5-question checkpoint quizzes and realistic mock exams."
-              : "Paste raw JSON or import pre-formatted module definitions with real-time Zod schema compatibility validation and 2-space formatting."}
+              : "Paste raw JSON or write custom module definitions with real-time Zod schema compatibility validation and 2-space formatting."}
           </p>
         </div>
 
         {/* Creation Ingress Mode Selector Tabs */}
         <div className="flex items-center justify-center">
-          <div className="inline-flex p-1.5 rounded-2xl bg-[#0a0a0a] border border-[#262626] gap-2">
+          <div className="inline-flex p-1.5 rounded-2xl bg-[#0a0a0a] border border-[#262626] gap-1.5 sm:gap-2">
+            <button
+              type="button"
+              onClick={() => setCreationMode("upload_json")}
+              className={`px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                creationMode === "upload_json"
+                  ? "bg-white text-black shadow-sm"
+                  : "text-neutral-400 hover:text-white hover:bg-[#141414]"
+              }`}
+            >
+              <UploadCloud className="w-4 h-4" /> Upload JSON File
+            </button>
             <button
               type="button"
               onClick={() => setCreationMode("ai")}
-              className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              className={`px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
                 creationMode === "ai"
                   ? "bg-white text-black shadow-sm"
                   : "text-neutral-400 hover:text-white hover:bg-[#141414]"
@@ -145,13 +191,13 @@ export default function CreateModulePage() {
             <button
               type="button"
               onClick={() => setCreationMode("direct_json")}
-              className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              className={`px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
                 creationMode === "direct_json"
                   ? "bg-white text-black shadow-sm"
                   : "text-neutral-400 hover:text-white hover:bg-[#141414]"
               }`}
             >
-              <FileCode2 className="w-4 h-4" /> Direct JSON Editor
+              <FileCode2 className="w-4 h-4" /> Raw JSON Editor
             </button>
           </div>
         </div>
@@ -259,25 +305,49 @@ export default function CreateModulePage() {
         )}
 
         {/* Ingress Main Container */}
-        {creationMode === "ai" ? (
+        {creationMode === "upload_json" ? (
+          <div className="p-6 md:p-8 rounded-3xl bg-[#0a0a0a] border border-[#262626] space-y-6">
+            <JsonFileUpload
+              initialJson={uploadedJsonText}
+              initialFileName={uploadedJsonFileName}
+              defaultCourse="General Studies"
+              onSwitchToEditor={(json) => {
+                setDirectJsonText(json);
+                setCreationMode("direct_json");
+              }}
+              onImportSuccess={(mod) => {
+                setGeneratedModule(mod);
+                const targetUrl =
+                  mod.moduleType === "quiz" ? `/quiz/${mod.moduleId}` : `/exam/${mod.moduleId}`;
+                router.push(targetUrl);
+              }}
+            />
+          </div>
+        ) : creationMode === "ai" ? (
           <div className="p-6 md:p-8 rounded-3xl bg-[#0a0a0a] border border-[#262626] space-y-6">
             <PdfDropzone
               onGenerate={handleGenerate}
               isGenerating={isGenerating}
-              onJsonDetected={(json) => {
-                setDirectJsonText(json);
-                setCreationMode("direct_json");
+              onJsonDetected={(json, fileName) => {
+                setUploadedJsonText(json);
+                setUploadedJsonFileName(fileName || "uploaded_module.json");
+                setCreationMode("upload_json");
               }}
             />
           </div>
         ) : (
           <div className="p-6 md:p-8 rounded-3xl bg-[#0a0a0a] border border-[#262626] space-y-6">
             <JsonModuleEditor
-              initialJson={directJsonText}
+              initialJson={directJsonText || uploadedJsonText}
               defaultCourse="General Studies"
+              onSwitchToUpload={() => {
+                setUploadedJsonText(directJsonText);
+                setCreationMode("upload_json");
+              }}
               onImportSuccess={(mod) => {
                 setGeneratedModule(mod);
-                const targetUrl = mod.moduleType === "quiz" ? `/quiz/${mod.moduleId}` : `/exam/${mod.moduleId}`;
+                const targetUrl =
+                  mod.moduleType === "quiz" ? `/quiz/${mod.moduleId}` : `/exam/${mod.moduleId}`;
                 router.push(targetUrl);
               }}
             />
@@ -341,4 +411,3 @@ export default function CreateModulePage() {
     </div>
   );
 }
-

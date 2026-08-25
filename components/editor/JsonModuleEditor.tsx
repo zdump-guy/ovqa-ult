@@ -19,6 +19,7 @@ import {
   ChevronUp,
   Layers,
   ArrowRight,
+  UploadCloud,
 } from "lucide-react";
 import { PrepPulseModule } from "@/types";
 import { ModuleZodSchema } from "@/lib/schema";
@@ -28,6 +29,7 @@ export interface JsonModuleEditorProps {
   initialJson?: string;
   defaultCourse?: string;
   onImportSuccess?: (module: PrepPulseModule) => void;
+  onSwitchToUpload?: () => void;
   onCancel?: () => void;
 }
 
@@ -415,6 +417,7 @@ export function JsonModuleEditor({
   initialJson,
   defaultCourse,
   onImportSuccess,
+  onSwitchToUpload,
   onCancel,
 }: JsonModuleEditorProps) {
   const router = useRouter();
@@ -445,6 +448,21 @@ export function JsonModuleEditor({
   const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineGutterRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      try {
+        const text = await file.text();
+        setJsonText(text);
+        setFormatFeedback(`Loaded ${file.name}`);
+        setTimeout(() => setFormatFeedback(null), 3000);
+      } catch {
+        setFormatFeedback("Failed to read file");
+      }
+    }
+  };
 
   // Sync initialJson changes if prop updates
   useEffect(() => {
@@ -628,6 +646,37 @@ export function JsonModuleEditor({
 
         {/* Right: Quick Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Hidden File Input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={handleFileUpload}
+          />
+
+          {/* Upload JSON Button */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            title="Upload a .json file from your device"
+            className="px-3 py-1.5 rounded-xl bg-black border border-[#333333] hover:border-neutral-400 text-xs font-semibold text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <UploadCloud className="w-3.5 h-3.5 text-neutral-300" />
+            Upload File
+          </button>
+
+          {onSwitchToUpload && (
+            <button
+              type="button"
+              onClick={onSwitchToUpload}
+              title="Switch to visual file upload mode"
+              className="px-3 py-1.5 rounded-xl bg-[#141414] border border-[#333333] hover:border-neutral-400 text-xs font-semibold text-neutral-300 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              Visual Upload Mode
+            </button>
+          )}
+
           {/* Format JSON Button */}
           <button
             type="button"
