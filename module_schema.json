@@ -1,0 +1,119 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PrepPulseModule",
+  "type": "object",
+  "required": [
+    "title",
+    "description",
+    "moduleType",
+    "targetSubject",
+    "config",
+    "questions"
+  ],
+  "properties": {
+    "moduleId": {
+      "type": "string",
+      "description": "Unique identifier for the prep module"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Title of the module"
+    },
+    "description": {
+      "type": "string",
+      "description": "Comprehensive description of module contents"
+    },
+    "moduleType": {
+      "type": "string",
+      "enum": ["quiz", "exam"],
+      "description": "Target engine mode"
+    },
+    "targetSubject": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Academic discipline or topic domain"
+    },
+    "course": {
+      "type": "string",
+      "description": "Academic course or subject grouping (e.g., CS 401: Deep Learning)"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "quizConfig": {
+          "type": "object",
+          "properties": {
+            "checkpointInterval": { "type": "integer", "default": 5, "minimum": 1 },
+            "timePerQuestionSeconds": { "type": "integer", "default": 15, "minimum": 5 },
+            "checkpointPassThreshold": { "type": "number", "default": 0.8, "minimum": 0, "maximum": 1 },
+            "enableStreakBonus": { "type": "boolean", "default": true }
+          }
+        },
+        "examConfig": {
+          "type": "object",
+          "properties": {
+            "totalDurationMinutes": { "type": "integer", "default": 60, "minimum": 1 },
+            "passingScorePercentage": { "type": "integer", "default": 60, "minimum": 0, "maximum": 100 },
+            "shuffleQuestions": { "type": "boolean", "default": true },
+            "shuffleOptions": { "type": "boolean", "default": true },
+            "allowReview": { "type": "boolean", "default": true }
+          }
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "checkpoint",
+          "difficulty",
+          "prompt",
+          "options",
+          "correctOptionIds",
+          "explanation"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["multiple_choice", "multi_select", "true_false"]
+          },
+          "checkpoint": { "type": "integer", "default": 1, "minimum": 1 },
+          "difficulty": {
+            "type": "string",
+            "enum": ["easy", "medium", "hard"]
+          },
+          "prompt": { "type": "string", "minLength": 1 },
+          "options": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "required": ["id", "text"],
+              "properties": {
+                "id": { "type": "string" },
+                "text": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "correctOptionIds": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" }
+          },
+          "explanation": { "type": "string", "minLength": 1 },
+          "sourceReference": { "type": "string" }
+        }
+      }
+    }
+  }
+}

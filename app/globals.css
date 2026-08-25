@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #000000;
+  --foreground: #ffffff;
+  --border: #262626;
+  --radius: 0.75rem;
+}
+
+@layer base {
+  * {
+    border-color: #262626;
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer components {
+  /* Wireframe OLED Cards */
+  .wireframe-card {
+    @apply bg-[#0a0a0a] border border-[#262626] rounded-2xl text-white;
+  }
+  .wireframe-card-elevated {
+    @apply bg-[#111111] border border-[#333333] rounded-2xl text-white;
+  }
+
+  /* Glassmorphism Panel (OLED Dark) */
+  .glass-card {
+    @apply backdrop-blur-md bg-black/80 border border-[#262626] text-white;
+  }
+  .glass-card-dark {
+    @apply backdrop-blur-md bg-[#0a0a0a]/90 border border-[#262626] text-white;
+  }
+
+  /* Micro-timer SVG Ring transitions */
+  .timer-ring-white,
+  .timer-ring-green,
+  .timer-ring-amber,
+  .timer-ring-rose {
+    stroke: #ffffff;
+    transition: stroke-dashoffset 1s linear, stroke 0.3s ease;
+  }
+
+  /* Button and Interactive Utilities */
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-4 py-2 rounded-xl bg-white text-black font-bold hover:bg-neutral-200 active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center px-4 py-2 rounded-xl bg-black text-white border border-[#333333] font-medium hover:bg-[#111111] hover:border-neutral-400 hover:text-white active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center px-4 py-2 rounded-xl bg-black text-white border border-neutral-700 font-bold hover:bg-neutral-900 active:scale-[0.98] transition-all;
+  }
+}
+
