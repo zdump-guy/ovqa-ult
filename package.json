@@ -17,6 +17,7 @@
     "@ai-sdk/openai": "^1.1.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.48.1",
+    "@vercel/analytics": "^2.0.1",
     "ai": "^4.1.0",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
