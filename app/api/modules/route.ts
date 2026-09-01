@@ -2,18 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ModuleZodSchema } from "@/lib/schema";
 import { PrepPulseModule } from "@/types";
-import { createClient } from "@/lib/supabase/server";
-import { ALL_DEMO_MODULES } from "@/lib/demo-modules";
+import { createAdminClient } from "@/lib/supabase/admin";
 
-// In-memory cache for fallback / offline server persistence
-const inMemoryPublicModules = new Map<string, PrepPulseModule>();
-
-// Initialize with demo modules
-ALL_DEMO_MODULES.forEach((mod) => {
-  if (mod.moduleId) {
-    inMemoryPublicModules.set(mod.moduleId, mod);
-  }
-});
+const isUuid = (val?: string): boolean =>
+  typeof val === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val);
 
 const BatchModulesPayloadSchema = z.union([
   ModuleZodSchema,
@@ -25,8 +18,9 @@ const BatchModulesPayloadSchema = z.union([
 
 /**
  * GET /api/modules
- * Returns all public modules (from Supabase DB + in-memory cache + demo modules).
- * Open to all public users at all times without authentication.
+ * Returns all persisted public modules directly from Supabase PostgreSQL using Service Role admin client.
+ * Bypasses RLS to ensure consistent cross-device synchronization.
+ * Returns empty array [] (count: 0) if no modules exist in PostgreSQL (zero mock data).
  */
 export async function GET(req: NextRequest) {
   try {
@@ -34,44 +28,35 @@ export async function GET(req: NextRequest) {
     const typeFilter = searchParams.get("type"); // "quiz" | "exam" | null
     const courseFilter = searchParams.get("course"); // course name | null
 
-    const modulesMap = new Map<string, PrepPulseModule>();
+    const supabase = createAdminClient();
+    const { data: dbModules, error: dbError } = await supabase
+      .from("modules")
+      .select("id, title, description, module_type, subject, config, raw_json, created_at, user_id")
+      .order("created_at", { ascending: false });
 
-    // 1. Load from in-memory / demo cache
-    inMemoryPublicModules.forEach((mod, id) => {
-      modulesMap.set(id, mod);
-    });
-
-    // 2. Fetch from Supabase modules table if configured
-    try {
-      const supabase = await createClient();
-      const { data: dbModules, error: dbError } = await supabase
-        .from("modules")
-        .select("id, title, description, module_type, subject, config, raw_json, created_at, user_id")
-        .order("created_at", { ascending: false });
-
-      if (!dbError && dbModules) {
-        for (const row of dbModules) {
-          const raw = row.raw_json as PrepPulseModule;
-          const parsedMod: PrepPulseModule = {
-            ...raw,
-            moduleId: row.id,
-            title: row.title || raw.title,
-            description: row.description || raw.description || "",
-            moduleType: (row.module_type as "quiz" | "exam") || raw.moduleType,
-            targetSubject: row.subject || raw.targetSubject,
-            course: raw.course || row.subject || "General Studies",
-            createdAt: row.created_at || raw.createdAt,
-          };
-          modulesMap.set(row.id, parsedMod);
-          inMemoryPublicModules.set(row.id, parsedMod);
-        }
-      }
-    } catch (err) {
-      // Offline / unconfigured database fallback is normal
-      console.warn("Supabase public modules query skipped:", err);
+    if (dbError) {
+      console.error("Database error in GET /api/modules:", dbError);
+      return NextResponse.json(
+        { error: "Failed to retrieve public modules", details: dbError.message },
+        { status: 500 }
+      );
     }
 
-    let result = Array.from(modulesMap.values());
+    let result: PrepPulseModule[] = (dbModules || []).map((row) => {
+      const raw = (row.raw_json || {}) as PrepPulseModule;
+      return {
+        ...raw,
+        moduleId: raw.moduleId || row.id,
+        title: row.title || raw.title || "Untitled Module",
+        description: row.description ?? raw.description ?? "",
+        moduleType: (row.module_type as "quiz" | "exam") || raw.moduleType || "quiz",
+        targetSubject: row.subject || raw.targetSubject || "General Studies",
+        course: raw.course || row.subject || "General Studies",
+        createdAt: row.created_at || raw.createdAt || new Date().toISOString(),
+        config: row.config || raw.config || {},
+        questions: raw.questions || [],
+      };
+    });
 
     // Apply optional query filters
     if (typeFilter && (typeFilter === "quiz" || typeFilter === "exam")) {
@@ -101,12 +86,21 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/modules
- * Uploads and saves single or multiple modules to the public central repository.
- * Makes modules universally accessible to anyone at all times.
+ * Uploads and persists single or multiple modules to Supabase PostgreSQL using Service Role admin client.
+ * Bypasses RLS to ensure universal cross-device persistence.
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid JSON format in request body" },
+        { status: 400 }
+      );
+    }
+
     const parseResult = BatchModulesPayloadSchema.safeParse(body);
 
     if (!parseResult.success) {
@@ -135,79 +129,86 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const supabase = createAdminClient();
     const savedModules: PrepPulseModule[] = [];
 
-    // Attempt to persist to Supabase
-    let supabaseClient: Awaited<ReturnType<typeof createClient>> | null = null;
-    try {
-      supabaseClient = await createClient();
-    } catch {
-      supabaseClient = null;
-    }
-
     for (const mod of inputModules) {
-      const generatedId =
-        mod.moduleId && mod.moduleId.length > 5
-          ? mod.moduleId
-          : `mod_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const isInputUuid = isUuid(mod.moduleId);
+      const finalModuleId = mod.moduleId && mod.moduleId.trim().length > 0
+        ? mod.moduleId
+        : crypto.randomUUID();
 
       const finalModule: PrepPulseModule = {
         ...mod,
-        moduleId: generatedId,
+        moduleId: finalModuleId,
         course: mod.course?.trim() || mod.targetSubject?.trim() || "General Studies",
         createdAt: mod.createdAt || new Date().toISOString(),
       };
 
-      // 1. Store in memory cache
-      inMemoryPublicModules.set(generatedId, finalModule);
-      savedModules.push(finalModule);
+      // 1. Insert module into public.modules table with user_id: null for public modules
+      const { data: dbMod, error: modError } = await supabase
+        .from("modules")
+        .insert({
+          id: isInputUuid ? finalModuleId : undefined,
+          user_id: null, // Public module accessible universally
+          title: finalModule.title,
+          description: finalModule.description || "",
+          module_type: finalModule.moduleType,
+          subject: finalModule.targetSubject,
+          config: finalModule.config || {},
+          raw_json: finalModule,
+        })
+        .select("id")
+        .single();
 
-      // 2. Persist to Supabase if available
-      if (supabaseClient) {
-        try {
-          // Check if valid UUID for Supabase primary key
-          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-            generatedId
+      if (modError || !dbMod) {
+        console.error("Database error persisting module:", modError);
+        return NextResponse.json(
+          {
+            error: "Failed to persist module to database",
+            details: modError?.message || "Unknown error",
+          },
+          { status: 500 }
+        );
+      }
+
+      // If no valid custom moduleId was provided, use the PostgreSQL generated UUID
+      if (!mod.moduleId || !mod.moduleId.trim()) {
+        finalModule.moduleId = dbMod.id;
+      }
+
+      // 2. Insert questions into public.questions table
+      if (finalModule.questions && finalModule.questions.length > 0) {
+        const questionsPayload = finalModule.questions.map((q) => ({
+          ...(isUuid(q.id) ? { id: q.id } : {}),
+          module_id: dbMod.id,
+          checkpoint_tier: q.checkpoint || 1,
+          question_type: q.type,
+          difficulty: q.difficulty,
+          prompt: q.prompt,
+          options: q.options,
+          correct_option_ids: q.correctOptionIds,
+          explanation: q.explanation || "",
+          source_reference: q.sourceReference || null,
+        }));
+
+        const { error: qError } = await supabase.from("questions").insert(questionsPayload);
+
+        if (qError) {
+          console.error("Database error persisting questions:", qError);
+          // Rollback inserted module to maintain atomicity
+          await supabase.from("modules").delete().eq("id", dbMod.id);
+          return NextResponse.json(
+            {
+              error: "Failed to persist questions to database",
+              details: qError.message,
+            },
+            { status: 500 }
           );
-
-          const { data: dbMod, error: modError } = await supabaseClient
-            .from("modules")
-            .insert({
-              id: isUuid ? generatedId : undefined,
-              user_id: null, // Public module accessible by everyone
-              title: finalModule.title,
-              description: finalModule.description || "",
-              module_type: finalModule.moduleType,
-              subject: finalModule.targetSubject,
-              config: finalModule.config || {},
-              raw_json: finalModule,
-            })
-            .select("id")
-            .single();
-
-          if (!modError && dbMod) {
-            finalModule.moduleId = dbMod.id;
-            inMemoryPublicModules.set(dbMod.id, finalModule);
-
-            // Insert questions
-            const questionsPayload = finalModule.questions.map((q) => ({
-              module_id: dbMod.id,
-              checkpoint_tier: q.checkpoint || 1,
-              question_type: q.type,
-              difficulty: q.difficulty,
-              prompt: q.prompt,
-              options: q.options,
-              correct_option_ids: q.correctOptionIds,
-              explanation: q.explanation || "",
-              source_reference: q.sourceReference,
-            }));
-
-            await supabaseClient.from("questions").insert(questionsPayload);
-          }
-        } catch (dbErr) {
-          console.warn("Could not insert module to Supabase, stored in memory cache:", dbErr);
         }
       }
+
+      savedModules.push(finalModule);
     }
 
     return NextResponse.json(
@@ -230,38 +231,95 @@ export async function POST(req: NextRequest) {
 
 /**
  * DELETE /api/modules
- * Admin-only route to delete a module from the public central repository.
+ * Deletes a module and all its associated questions from Supabase PostgreSQL using Service Role admin client.
+ * Relies on PostgreSQL foreign key ON DELETE CASCADE on public.questions(module_id).
  */
 export async function DELETE(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const moduleId = searchParams.get("moduleId");
 
-    if (!moduleId) {
+    if (!moduleId || !moduleId.trim()) {
       return NextResponse.json(
         { error: "Module ID is required" },
         { status: 400 }
       );
     }
 
-    // Remove from in-memory cache
-    const existed = inMemoryPublicModules.delete(moduleId);
+    const supabase = createAdminClient();
 
-    // Delete from Supabase if connected
-    try {
-      const supabase = await createClient();
-      await supabase.from("modules").delete().eq("id", moduleId);
-    } catch (err) {
-      console.warn("Supabase module deletion notice:", err);
+    if (isUuid(moduleId)) {
+      const { data, error } = await supabase
+        .from("modules")
+        .delete()
+        .eq("id", moduleId)
+        .select("id");
+
+      if (error) {
+        console.error("Database error deleting module:", error);
+        return NextResponse.json(
+          { error: "Failed to delete module from database", details: error.message },
+          { status: 500 }
+        );
+      }
+
+      const deleted = Boolean(data && data.length > 0);
+      return NextResponse.json({
+        success: true,
+        moduleId,
+        deleted,
+      });
     }
 
+    // For non-UUID custom IDs, find by raw_json moduleId
+    const { data: dbModules, error: queryError } = await supabase
+      .from("modules")
+      .select("id, raw_json");
+
+    if (queryError) {
+      console.error("Database error querying module for deletion:", queryError);
+      return NextResponse.json(
+        { error: "Failed to delete module from database", details: queryError.message },
+        { status: 500 }
+      );
+    }
+
+    const targetRow = (dbModules || []).find((row) => {
+      const raw = (row.raw_json || {}) as PrepPulseModule;
+      return raw.moduleId === moduleId || row.id === moduleId;
+    });
+
+    if (!targetRow) {
+      return NextResponse.json({
+        success: true,
+        moduleId,
+        deleted: false,
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("modules")
+      .delete()
+      .eq("id", targetRow.id)
+      .select("id");
+
+    if (error) {
+      console.error("Database error deleting module:", error);
+      return NextResponse.json(
+        { error: "Failed to delete module from database", details: error.message },
+        { status: 500 }
+      );
+    }
+
+    const deleted = Boolean(data && data.length > 0);
     return NextResponse.json({
       success: true,
       moduleId,
-      deleted: existed,
+      deleted,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error("Error in DELETE /api/modules:", message);
     return NextResponse.json(
       { error: "Failed to delete module", details: message },
       { status: 500 }

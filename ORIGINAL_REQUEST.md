@@ -1,49 +1,41 @@
 # Original User Request
 
-## 2026-09-01T14:50:06Z
+## Initial Request — 2026-09-01T18:54:33+03:00
 
-Refactor and simplify the PrepPulse project to streamline the learner flow into a zero-friction, course-first experience while consolidating all module uploading and library management into a dedicated, passcode-protected admin portal.
+<USER_REQUEST>
+Fix cross-device module synchronization by properly persisting all uploaded modules to Supabase PostgreSQL using the Service Role admin client (resolving RLS error 42501), and completely purge all hardcoded mock/demo data from the learner and player fallback layers.
 
 Working directory: /home/bravo-07/Documents/dev/ovqa
 Integrity mode: development
 
 ## Requirements
 
-### R1. Centralized Module Persistence & API Synchronization
-- Ensure `/api/modules` serves as the primary gateway for querying, creating, and deleting quiz and exam modules against the centralized database (Supabase `modules` table), with resilient offline/demo fallback.
-- Ensure all uploaded modules accurately preserve Course categorization, Subject, Title, ModuleType (`quiz` vs `exam`), and question payload.
+### R1. Real Cloud Persistence via Supabase Service Role (Cross-Device Sync)
+- Update `/api/modules` (GET, POST, DELETE) and `/api/modules/[moduleId]` to use the Supabase Service Role admin client for database operations to bypass RLS restrictions and guarantee that uploaded modules are permanently saved to PostgreSQL.
+- Return explicit HTTP errors if a database write fails rather than silently swallowing errors and falling back to ephemeral in-memory maps.
+- Ensure any module uploaded on one device is immediately queryable and playable from any other device or browser.
 
-### R2. Dedicated Admin Upload & Management Portal (/admin)
-- Protect the `/admin` console with a secure admin key/passcode check (via `/admin/login`).
-- Consolidate all module creation tools (JSON File Upload, Direct JSON Editor, AI PDF generator) exclusively inside the `/admin` portal.
-- Enable the admin to specify Course name, Module Title, Target Subject, and Module Type (`quiz` | `exam`) and publish modules directly to the database.
-- Provide a module management view for the admin to search, preview, and delete live modules from the repository.
+### R2. Complete Removal of Mock/Demo Data & Fallback Hallucinations
+- Remove all hardcoded demo/mock modules (`ALL_DEMO_MODULES`, `DEMO_QUIZ_MODULE`, `DEMO_EXAM_MODULE`) from the runtime catalog, API responses, and player fallbacks.
+- When no modules exist in the database, display a clean, accurate empty state ("No modules uploaded yet") with an admin upload link instead of rendering fake sample courses.
+- In `/quiz/[moduleId]` and `/exam/[moduleId]`, if a requested module ID is not found in Supabase, display a clear "Module Not Found" error screen instead of silently substituting a mock quiz/exam.
 
-### R3. Streamlined Learner Experience with Clear Course, Quiz, and Exam Separation
-- Simplify the home/root route (`/`) to directly display a clean Course Library (e.g., Biology, Computer Science, Organic Chemistry) without marketing clutter or complex management toolbars.
-- Selecting a Course presents a dedicated, focused course view with two distinct, separated sections: **Practice Quizzes** and **Simulated Exams**.
-- Each quiz/exam card provides essential details (question count, duration) and a single-click direct **Start** action navigating directly to the quiz player (`/quiz/[moduleId]`) or exam player (`/exam/[moduleId]`).
-- The top header is minimal and distraction-free: Brand logo, **History** (for viewing past test attempts and diagnostics), and an unobtrusive **Admin** access link.
-
-### R4. Clutter Removal & Codebase Cleanup
-- Remove the user-facing `/create` route and strip out user-facing batch-selection toolbars and delete modals from the learner dashboard.
-- Maintain existing player engines, diagnostic scoring calculations, and test runners.
+### R3. Admin Portal Direct Database Publishing
+- Ensure the Admin Portal (`/admin`) performs direct server mutations against `/api/modules` with immediate feedback (success/error alerts).
+- When an admin deletes a module from the admin console, delete it directly from Supabase PostgreSQL and evict any cached copies across all clients.
 
 ## Acceptance Criteria
 
-### Storage & Admin
-- [ ] Admin portal at `/admin` requires passcode authentication (`/admin/login`).
-- [ ] Admins can successfully upload JSON modules and publish them to `/api/modules`.
-- [ ] Admin can view the list of all modules and delete modules.
-- [ ] No module upload or creation interface is visible in the general learner UI.
+### Persistence & Cross-Device Access
+- [ ] Uploading a JSON module in `/admin` inserts real records into the Supabase `modules` table (verified via Supabase client with 0 RLS errors).
+- [ ] Querying `GET /api/modules` from any client/browser returns the uploaded module without requiring LocalStorage.
+- [ ] Loading `/quiz/[moduleId]` and `/exam/[moduleId]` fetches and plays the exact uploaded module.
 
-### Learner Flow & Separation
-- [ ] Root `/` presents a streamlined course catalog.
-- [ ] Courses are clearly organized, and selecting a course clearly separates **Practice Quizzes** from **Simulated Exams**.
-- [ ] Clicking "Start Quiz" directly launches `/quiz/[moduleId]`.
-- [ ] Clicking "Start Exam" directly launches `/exam/[moduleId]`.
-- [ ] Learner history remains accessible via a minimal History link.
+### Zero Mock Data
+- [ ] No hardcoded mock biology/computer science modules appear when the database is empty.
+- [ ] Invalid or non-existent module IDs show a 404 "Module Not Found" screen instead of substituting demo questions.
 
-### Quality & Verification
-- [ ] `npm run build` succeeds with zero TypeScript or Next.js errors.
-- [ ] All unit and integration test suites (`npm test` or `npx vitest run`) pass without regression.
+### Quality & Tests
+- [ ] `npm run build` succeeds with zero errors.
+- [ ] Test suites pass with updated real-data assertions.
+</USER_REQUEST>

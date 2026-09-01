@@ -6,6 +6,9 @@
 import { registry } from "./harness/test-runner.ts";
 
 // Tier 1: Feature Coverage Suites
+import "./e2e/tier1_feature_coverage/r1_cloud_persistence_service_role.test.ts";
+import "./e2e/tier1_feature_coverage/r2_mock_purge_and_404.test.ts";
+import "./e2e/tier1_feature_coverage/r3_admin_direct_publishing_eviction.test.ts";
 import "./e2e/tier1_feature_coverage/r1_json_import_validator.test.ts";
 import "./e2e/tier1_feature_coverage/r2_module_deletion_management.test.ts";
 import "./e2e/tier1_feature_coverage/r3_course_categorization_grouping.test.ts";
@@ -16,6 +19,9 @@ import "./e2e/tier1_feature_coverage/r4_diagnostic_report.test.ts";
 import "./e2e/tier1_feature_coverage/r5_database_auth_rls.test.ts";
 
 // Tier 2: Boundary & Corner Suites
+import "./e2e/tier2_boundary_corner/r1_persistence_boundaries.test.ts";
+import "./e2e/tier2_boundary_corner/r2_mock_purge_boundaries.test.ts";
+import "./e2e/tier2_boundary_corner/r3_admin_mutation_boundaries.test.ts";
 import "./e2e/tier2_boundary_corner/r1_json_validator_boundaries.test.ts";
 import "./e2e/tier2_boundary_corner/r2_deletion_boundaries.test.ts";
 import "./e2e/tier2_boundary_corner/r3_course_grouping_boundaries.test.ts";
@@ -26,13 +32,16 @@ import "./e2e/tier2_boundary_corner/r4_diagnostic_boundaries.test.ts";
 import "./e2e/tier2_boundary_corner/r5_security_boundaries.test.ts";
 
 // Tier 3: Cross-Feature Pairwise Suites
+import "./e2e/tier3_cross_feature/r1_r2_r3_cross_device_pipeline.test.ts";
 import "./e2e/tier3_cross_feature/cross_feature_combinations.test.ts";
 import "./e2e/tier3_cross_feature/integration_pipeline.test.ts";
 
 // Tier 4: Real-World Workflow Suites
+import "./e2e/tier4_real_world/r1_r2_r3_multi_device_curation.test.ts";
 import "./e2e/tier4_real_world/real_world_scenarios.test.ts";
 
 // Tier 5: Adversarial Hardening Suites
+import "./e2e/tier5_adversarial/r1_r2_r3_adversarial_persistence.test.ts";
 import "./e2e/tier5_adversarial/adversarial_hardening.test.ts";
 
 async function main() {

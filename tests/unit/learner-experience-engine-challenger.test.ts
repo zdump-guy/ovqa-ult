@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import React from "react";
 import { render, screen, cleanup } from "@testing-library/react";
 import { PrepPulseModule, Question, TestSession } from "@/types";
-import { ALL_DEMO_MODULES } from "@/lib/demo-modules";
 import { calculateDiagnosticReport } from "@/lib/diagnostics/score-calculator";
 import { generateSmartRetryModule } from "@/lib/diagnostics/remediation";
 import { formatDuration } from "@/lib/exam/useExamSession";
@@ -38,14 +37,37 @@ describe("Challenger 2: Learner Experience & Engine Integrity Verification", () 
   /* 1. Root / Course Library Rendering & Structure                             */
   /* -------------------------------------------------------------------------- */
   describe("1. Root / Course Library Direct Display", () => {
-    it("renders demo and custom modules partitioned by course without requiring navigation clicks", () => {
-      render(React.createElement(CourseAccordionGroup, { modules: ALL_DEMO_MODULES, isManageMode: false }));
+    it("renders custom modules partitioned by course without requiring navigation clicks", () => {
+      const sampleRealModules: PrepPulseModule[] = [
+        {
+          moduleId: "real_ds_1",
+          title: "Consensus Algorithms",
+          description: "Raft and Paxos",
+          moduleType: "quiz",
+          targetSubject: "Distributed Systems",
+          course: "CS 501: Distributed Systems",
+          config: {},
+          questions: [],
+        },
+        {
+          moduleId: "real_cloud_1",
+          title: "Cloud Infrastructure",
+          description: "AWS and GCP",
+          moduleType: "exam",
+          targetSubject: "Cloud Architecture",
+          course: "CS 502: Cloud Architecture",
+          config: {},
+          questions: [],
+        },
+      ];
+
+      render(React.createElement(CourseAccordionGroup, { modules: sampleRealModules, isManageMode: false }));
 
       // Verify that course sections are displayed
       const courseHeaders = screen.getAllByRole("heading", { level: 3 });
       expect(courseHeaders.length).toBeGreaterThan(0);
 
-      // Verify course names from demo modules are rendered (e.g. Distributed Systems, Cloud Architecture, etc.)
+      // Verify course names from modules are rendered
       const textContents = courseHeaders.map((h) => h.textContent);
       expect(textContents.some((t) => t?.includes("Distributed Systems") || t?.includes("Cloud Architecture"))).toBe(true);
     });

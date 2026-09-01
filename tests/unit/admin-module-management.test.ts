@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { PrepPulseModule } from "@/types";
-import { DEMO_QUIZ_MODULE, DEMO_EXAM_MODULE } from "@/lib/demo-modules";
 
 export function filterAdminModules(
   modules: PrepPulseModule[],
@@ -31,8 +30,26 @@ export function filterAdminModules(
 
 describe("Milestone 2: Admin Portal Management & Preview Suite", () => {
   const testCatalog: PrepPulseModule[] = [
-    DEMO_QUIZ_MODULE,
-    DEMO_EXAM_MODULE,
+    {
+      moduleId: "custom_ai_0",
+      title: "Computer Vision Foundations",
+      description: "Convolutions and pooling",
+      moduleType: "quiz",
+      targetSubject: "Artificial Intelligence",
+      course: "CS 401: Deep Learning",
+      config: {},
+      questions: [],
+    },
+    {
+      moduleId: "custom_bio_0",
+      title: "Cellular Respiration",
+      description: "Glycolysis and Krebs cycle",
+      moduleType: "exam",
+      targetSubject: "Biology",
+      course: "BIO 101: Cell Biology",
+      config: {},
+      questions: [],
+    },
     {
       moduleId: "custom_mod_1",
       title: "Natural Language Processing with Transformers",

@@ -1203,4 +1203,362 @@ export class MockSupabaseEngine {
 
     return this.modules.delete(moduleId);
   }
+
+  /* =========================================================================
+     9. Supabase Service Role Admin Client Operations (RLS Bypass)
+     ========================================================================= */
+  public simulateDatabaseFailure: boolean = false;
+
+  public insertModuleWithServiceRole(mod: DBModule): DBModule {
+    if (this.simulateDatabaseFailure) {
+      throw new Error("Supabase PostgreSQL write failed: connection error or table constraint violation");
+    }
+    this.modules.set(mod.id, { ...mod });
+    return mod;
+  }
+
+  public insertQuestionsWithServiceRole(questions: DBQuestion[]): void {
+    if (this.simulateDatabaseFailure) {
+      throw new Error("Supabase PostgreSQL write failed: questions insert batch failure");
+    }
+    for (const q of questions) {
+      this.questions.set(q.id, { ...q });
+    }
+  }
+
+  public queryModulesWithServiceRole(filters?: { type?: string | null; course?: string | null }): DBModule[] {
+    if (this.simulateDatabaseFailure) {
+      throw new Error("Supabase PostgreSQL query failed");
+    }
+    let results = Array.from(this.modules.values());
+    if (filters?.type && (filters.type === "quiz" || filters.type === "exam")) {
+      results = results.filter((m) => m.module_type === filters.type);
+    }
+    if (filters?.course && filters.course !== "ALL") {
+      results = results.filter(
+        (m) => (m.course || m.subject || "").toLowerCase() === filters.course!.toLowerCase()
+      );
+    }
+    return results;
+  }
+
+  public getModuleWithServiceRole(moduleId: string): { module: DBModule; questions: DBQuestion[] } | null {
+    if (this.simulateDatabaseFailure) {
+      throw new Error("Supabase PostgreSQL query failed");
+    }
+    const mod = this.modules.get(moduleId);
+    if (!mod) return null;
+    const questions: DBQuestion[] = [];
+    for (const q of this.questions.values()) {
+      if (q.module_id === moduleId) questions.push({ ...q });
+    }
+    return { module: { ...mod }, questions };
+  }
+
+  public deleteModuleWithServiceRole(moduleId: string): boolean {
+    if (this.simulateDatabaseFailure) {
+      throw new Error("Supabase PostgreSQL deletion failed");
+    }
+    if (!this.modules.has(moduleId)) return false;
+
+    for (const [qId, q] of this.questions.entries()) {
+      if (q.module_id === moduleId) this.questions.delete(qId);
+    }
+    for (const [sId, s] of this.testSessions.entries()) {
+      if (s.module_id === moduleId) this.testSessions.delete(sId);
+    }
+    return this.modules.delete(moduleId);
+  }
 }
+
+/* =========================================================================
+   10. Opaque-Box Server API Route Handlers (Service Role Admin Client)
+   ========================================================================= */
+export class MockApiModulesRouteHandler {
+  private db: MockSupabaseEngine;
+
+  constructor(db: MockSupabaseEngine) {
+    this.db = db;
+  }
+
+  public handleGet(queryParams: { type?: string | null; course?: string | null } = {}): {
+    status: number;
+    body: { success?: boolean; count?: number; modules?: PrepPulseModule[]; error?: string; details?: any };
+  } {
+    try {
+      const dbMods = this.db.queryModulesWithServiceRole(queryParams);
+      const modules: PrepPulseModule[] = dbMods.map((row) => {
+        const raw = (row.raw_json || {}) as PrepPulseModule;
+        return {
+          ...raw,
+          moduleId: row.id,
+          title: row.title || raw.title,
+          description: row.description || raw.description || "",
+          moduleType: row.module_type || raw.moduleType,
+          targetSubject: row.subject || raw.targetSubject,
+          course: row.course || raw.course || row.subject || "General Studies",
+          questions: raw.questions || [],
+        };
+      });
+
+      return {
+        status: 200,
+        body: {
+          success: true,
+          count: modules.length,
+          modules,
+        },
+      };
+    } catch (err: any) {
+      return {
+        status: 500,
+        body: { error: "Failed to retrieve public modules", details: err.message },
+      };
+    }
+  }
+
+  public handlePost(payload: unknown): {
+    status: number;
+    body: { success?: boolean; count?: number; modules?: PrepPulseModule[]; error?: string; details?: any };
+  } {
+    if (!payload || typeof payload !== "object") {
+      return { status: 400, body: { error: "Invalid module schema payload" } };
+    }
+
+    let inputModules: any[] = [];
+    const payloadObj = payload as Record<string, any>;
+    if (Array.isArray(payload)) {
+      inputModules = payload;
+    } else if (payloadObj.modules && Array.isArray(payloadObj.modules)) {
+      inputModules = payloadObj.modules;
+    } else if (payloadObj.title && payloadObj.questions) {
+      inputModules = [payload];
+    } else {
+      return { status: 400, body: { error: "Invalid module schema payload" } };
+    }
+
+    if (inputModules.length === 0) {
+      return { status: 400, body: { error: "No modules provided in payload" } };
+    }
+
+    const validatedModules: PrepPulseModule[] = [];
+    for (const item of inputModules) {
+      const val = validateModuleSchema(item);
+      if (!val.valid) {
+        return {
+          status: 400,
+          body: { error: "Invalid module schema payload", details: val.errors },
+        };
+      }
+      validatedModules.push(item as PrepPulseModule);
+    }
+
+    const saved: PrepPulseModule[] = [];
+    for (const mod of validatedModules) {
+      const generatedId =
+        mod.moduleId && mod.moduleId.length > 5
+          ? mod.moduleId
+          : `mod_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+      const finalMod: PrepPulseModule = {
+        ...mod,
+        moduleId: generatedId,
+        course: mod.course?.trim() || mod.targetSubject?.trim() || "General Studies",
+        createdAt: mod.createdAt || new Date().toISOString(),
+      };
+
+      try {
+        // Direct mutation against Supabase PostgreSQL via Service Role
+        this.db.insertModuleWithServiceRole({
+          id: generatedId,
+          user_id: "system_admin",
+          title: finalMod.title,
+          description: finalMod.description,
+          module_type: finalMod.moduleType,
+          subject: finalMod.targetSubject,
+          course: finalMod.course,
+          config: finalMod.config,
+          raw_json: finalMod,
+          is_public: true,
+        });
+
+        const questionsPayload: DBQuestion[] = finalMod.questions.map((q) => ({
+          id: q.id,
+          module_id: generatedId,
+          checkpoint_tier: q.checkpoint || 1,
+          question_type: q.type,
+          difficulty: q.difficulty,
+          prompt: q.prompt,
+          options: q.options,
+          correct_option_ids: q.correctOptionIds,
+          explanation: q.explanation,
+        }));
+
+        this.db.insertQuestionsWithServiceRole(questionsPayload);
+        saved.push(finalMod);
+      } catch (dbErr: any) {
+        // Explicit HTTP 500 error returned on write failure with zero in-memory fallback
+        return {
+          status: 500,
+          body: {
+            error: "Failed to persist uploaded modules to database",
+            details: dbErr.message,
+          },
+        };
+      }
+    }
+
+    return {
+      status: 201,
+      body: {
+        success: true,
+        count: saved.length,
+        modules: saved,
+      },
+    };
+  }
+
+  public handleDelete(moduleId: string | null | undefined): {
+    status: number;
+    body: { success?: boolean; moduleId?: string; deleted?: boolean; error?: string; details?: any };
+  } {
+    if (!moduleId) {
+      return { status: 400, body: { error: "Module ID is required" } };
+    }
+
+    try {
+      const deleted = this.db.deleteModuleWithServiceRole(moduleId);
+      return {
+        status: 200,
+        body: {
+          success: true,
+          moduleId,
+          deleted,
+        },
+      };
+    } catch (err: any) {
+      return {
+        status: 500,
+        body: { error: "Failed to delete module from database", details: err.message },
+      };
+    }
+  }
+}
+
+export class MockApiSingleModuleRouteHandler {
+  private db: MockSupabaseEngine;
+
+  constructor(db: MockSupabaseEngine) {
+    this.db = db;
+  }
+
+  public handleGet(moduleId: string | null | undefined): {
+    status: number;
+    body: { success?: boolean; module?: PrepPulseModule; error?: string; details?: any };
+  } {
+    if (!moduleId) {
+      return { status: 400, body: { error: "Module ID parameter is required" } };
+    }
+
+    try {
+      const result = this.db.getModuleWithServiceRole(moduleId);
+      if (!result) {
+        // Zero demo module substitution - return 404
+        return {
+          status: 404,
+          body: { error: `Module '${moduleId}' not found` },
+        };
+      }
+
+      const raw = (result.module.raw_json || {}) as PrepPulseModule;
+      const finalModule: PrepPulseModule = {
+        ...raw,
+        moduleId: result.module.id,
+        title: result.module.title || raw.title,
+        description: result.module.description || raw.description || "",
+        moduleType: result.module.module_type || raw.moduleType,
+        targetSubject: result.module.subject || raw.targetSubject,
+        course: result.module.course || raw.course || result.module.subject || "General Studies",
+        questions: raw.questions || [],
+      };
+
+      return {
+        status: 200,
+        body: {
+          success: true,
+          module: finalModule,
+        },
+      };
+    } catch (err: any) {
+      return {
+        status: 500,
+        body: { error: "Failed to fetch module from database", details: err.message },
+      };
+    }
+  }
+}
+
+/* =========================================================================
+   11. Learner Catalog & Player UI Simulation Helpers (R2 Empty & 404 States)
+   ========================================================================= */
+export interface CatalogRenderOutput {
+  isEmpty: boolean;
+  emptyStateText?: string;
+  adminUploadLink?: string;
+  renderedModuleCount: number;
+  courseTabs: CourseTab[];
+}
+
+export function renderLearnerCatalog(modules: PrepPulseModule[]): CatalogRenderOutput {
+  if (modules.length === 0) {
+    return {
+      isEmpty: true,
+      emptyStateText: "No modules uploaded yet",
+      adminUploadLink: "/admin",
+      renderedModuleCount: 0,
+      courseTabs: [{ id: "ALL", label: "All Courses", count: 0 }],
+    };
+  }
+
+  const tabs = extractCourseTabs(modules);
+  return {
+    isEmpty: false,
+    renderedModuleCount: modules.length,
+    courseTabs: tabs,
+  };
+}
+
+export interface PlayerRenderOutput {
+  status: "READY" | "NOT_FOUND" | "ERROR";
+  errorScreenTitle?: string;
+  errorScreenMessage?: string;
+  canPlay: boolean;
+  module?: PrepPulseModule;
+}
+
+export function renderPlayerScreen(apiResponse: { status: number; body: any }): PlayerRenderOutput {
+  if (apiResponse.status === 404) {
+    return {
+      status: "NOT_FOUND",
+      errorScreenTitle: "Module Not Found",
+      errorScreenMessage: apiResponse.body?.error || "The requested module does not exist.",
+      canPlay: false,
+    };
+  }
+
+  if (apiResponse.status !== 200 || !apiResponse.body?.module) {
+    return {
+      status: "ERROR",
+      errorScreenTitle: "Error Loading Module",
+      errorScreenMessage: apiResponse.body?.error || "Failed to load module.",
+      canPlay: false,
+    };
+  }
+
+  return {
+    status: "READY",
+    canPlay: true,
+    module: apiResponse.body.module,
+  };
+}
+

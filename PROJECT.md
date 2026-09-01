@@ -1,84 +1,72 @@
-# Project: PrepPulse Refactoring
+# Project: OVQA PrepPulse Cross-Device Persistence & Mock Purge
 
 ## Architecture
-PrepPulse is a zero-friction, course-first learning platform built on Next.js 15 App Router, React 19, Tailwind CSS, TypeScript, and Supabase with a 4-tier resilience fallback (Supabase -> Server In-Memory -> LocalStorage -> Static Demo Modules).
-
-The refactored architecture establishes a strict separation of concerns:
-- **Learner Flow (`/`, `/quiz/[moduleId]`, `/exam/[moduleId]`, `/history`, `/results/[sessionId]`)**: Zero-friction, course-first exploration. Courses cleanly partition into "Practice Quizzes" and "Simulated Exams" with single-click direct start actions. No creation/upload or deletion clutter in the learner interface.
-- **Admin Portal (`/admin`, `/admin/login`)**: Protected by dedicated passcode authentication. Centralizes all module creation tools (JSON File Upload, AI PDF Extraction & Generation, Interactive JSON Editor) and administrative operations (listing, searching, previewing, and deleting modules).
-- **API Persistence Layer (`/api/modules`, `/api/sessions`, `/api/upload`, `/api/generate-module`)**: Centralized gateway syncing with Supabase PostgreSQL tables (`modules`, `questions`, `test_sessions`) with seamless in-memory and local fallback.
+- **Framework**: Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS, Lucide icons.
+- **Database**: Supabase PostgreSQL with tables `modules`, `questions`, `test_sessions`, `profiles`.
+- **Database Client**: Supabase Service Role Admin Client (`lib/supabase/admin.ts`) using `SUPABASE_SERVICE_ROLE_KEY` to bypass RLS (error 42501) on server route handlers.
+- **API Layer**:
+  - `/api/modules` (GET, POST, DELETE): Administrative and public module endpoints using Service Role client.
+  - `/api/modules/[moduleId]` (GET): Single module lookup endpoint using Service Role client.
+  - Strict error propagation: No silent swallowing of DB errors, no fallback in-memory caching.
+- **Frontend / UI Layer**:
+  - `/` (Learner Catalog): Real-time fetching from `GET /api/modules`. When 0 modules exist, renders clean "No modules uploaded yet" empty state with a link to `/admin`.
+  - `/quiz/[moduleId]` & `/exam/[moduleId]`: Real-time module loader. Renders explicit "Module Not Found" 404 UI if moduleId is not in Supabase.
+  - `/admin`: Direct server mutations against `/api/modules` for JSON upload, editor, and deletion. Evicts local cache on deletion.
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
-|---|---|---|---|---|
-| F1 | Centralized Module Persistence & API Gateway | `/api/modules` CRUD against Supabase `modules` & `questions` tables with resilient fallback, accurate course categorization, subject, title, moduleType ("quiz" vs "exam"), questions | M1 | R1, survey |
-| F2 | Passcode-Protected Admin Authentication | `/admin/login` requiring dedicated passcode with session cookie protection for `/admin` | M2 | R2, survey |
-| F3 | Admin Module Ingress & Management Hub | Dedicated `/admin` portal consolidating JSON file upload, JSON module editor, AI PDF extraction tools, listing, searching, previewing, and deleting modules | M2 | R2, survey |
-| F4 | Admin Module Publishing to API | Ingested modules in Admin portal publish directly to `/api/modules` for immediate catalog availability | M2 | R1, R2 |
-| F5 | Course-First Learner Experience on Root `/` | Root `/` directly renders the clean Course Library with course categorization | M3 | R3, survey |
-| F6 | Distinct Practice Quiz and Simulated Exam Separation | Inside each course card/section, modules are cleanly split into Practice Quizzes and Simulated Exams | M3 | R3, survey |
-| F7 | Single-Click Direct Module Launch | "Start Quiz" directly links to `/quiz/[moduleId]` and "Start Exam" directly links to `/exam/[moduleId]` | M3 | R3, survey |
-| F8 | Minimal Learner Navigation Header | Header with Logo, History link, and unobtrusive Admin link (no `/create` link) | M3 | R3, survey |
-| F9 | Clutter Removal & `/create` Route Elimination | Delete `app/(dashboard)/create/page.tsx` and strip manage checkboxes, batch action bars, and delete modals from learner UI | M4 | R4, survey |
-| F10 | Engine & Diagnostic Scoring Preservation | Maintain Rapid Checkpoint Quiz Engine, Mock Exam Simulator, score calculator, remediation planner, and session logging | M4 | R4, survey |
-| F11 | End-to-End Build & Test Suite Verification | Full Vitest unit test suite (301 tests) and E2E test suite pass with zero regressions, and `npm run build` succeeds | M5 | Acceptance criteria |
+|---|---------|-------------|-----------|--------|
+| 1 | Supabase Service Role Admin Client | Instantiate admin client using `SUPABASE_SERVICE_ROLE_KEY` in `lib/supabase/admin.ts` to bypass RLS policies. | M1 | R1 |
+| 2 | Persistent `POST /api/modules` | Insert uploaded modules & questions directly into Supabase PostgreSQL, returning HTTP 201 on success or explicit HTTP 4xx/5xx on error with zero in-memory swallowing. | M1 | R1 |
+| 3 | Real-Data `GET /api/modules` | Query Supabase `modules` table directly, returning only persisted modules (empty array if 0 modules exist) with zero mock pre-population. | M1 | R1, R2 |
+| 4 | Persistent `DELETE /api/modules` | Delete module and cascading questions directly from Supabase PostgreSQL using admin client. | M1 | R1, R3 |
+| 5 | Real-Data `GET /api/modules/[moduleId]` | Query Supabase for exact `moduleId`, returning 404 if not found with zero demo module substitution. | M1 | R1, R2 |
+| 6 | Purge Mock Data from Catalog & Admin | Remove all imports and usages of `ALL_DEMO_MODULES`, `DEMO_QUIZ_MODULE`, `DEMO_EXAM_MODULE` from `app/page.tsx` and `app/admin/page.tsx`. | M2 | R2 |
+| 7 | Catalog Clean Empty State | Display "No modules uploaded yet" with an admin upload link when Supabase has 0 modules. | M2 | R2 |
+| 8 | Player 404 Screen | Display "Module Not Found" 404 screen on `/quiz/[moduleId]` and `/exam/[moduleId]` when module ID does not exist in Supabase. | M2 | R2 |
+| 9 | Results Session Fallback Purge | Remove demo module fallbacks from `/results/[sessionId]`. | M2 | R2 |
+| 10 | Admin Direct Publishing & Feedback | Admin portal (`/admin`) performs direct server mutations against `/api/modules` with immediate success/error alert banners. | M3 | R3 |
+| 11 | Admin Deletion & Client Cache Eviction | Deleting module in `/admin` removes it from Supabase and purges local storage caches (`preppulse_local_modules`, sessions). | M3 | R3 |
+| 12 | Test Suite Real-Data Assertions | Update unit and E2E test assertions to assert clean empty states and real-data flows instead of expecting hardcoded demo modules. | M1, M2, M3 | AC |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
-|---|---|---|---|---|
-| M1 | Centralized Module Persistence & API Sync | Verify & ensure `/api/modules` handles full module schema with course metadata, Supabase sync & resilient fallback | none | DONE |
-| M2 | Dedicated Admin Portal & Passcode Auth | Create `/admin/login` with passcode auth, consolidate upload/editor/AI tools in `/admin`, module listing & deletion | M1 | DONE |
-| M3 | Streamlined Learner Experience | Root `/` Course Library, clear separation of Quizzes and Exams, single-click direct Start buttons, minimal header | M1 | DONE |
-| M4 | Clutter Removal & Codebase Cleanup | Remove `/create`, strip batch toolbars/delete modals from learner UI, preserve quiz/exam player engines & scoring | M2, M3 | DONE |
-| M5 | Full Verification & Regression Testing | Run `npm test`, `npm run test:e2e`, `npm run build`, review and verify zero regressions | M1, M2, M3, M4 | DONE |
+|---|------|-------|-------------|--------|
+| 1 | M1: Supabase Service Role Persistence & API Layer | Create `lib/supabase/admin.ts`, update `/api/modules` and `/api/modules/[moduleId]` to use admin client, enforce explicit HTTP errors, eliminate `inMemoryPublicModules`. | none | PLANNED |
+| 2 | M2: Mock Data Purge, 404 Error Screens & Empty Catalog State | Remove all mock/demo imports in learner catalog and player routes. Implement 404 UI for invalid module IDs in `/quiz/[moduleId]` and `/exam/[moduleId]`. Implement clean empty state with upload link on `/`. | M1 | PLANNED |
+| 3 | M3: Admin Direct Publishing & Cross-Device Synchronization | Ensure Admin portal (`/admin`) mutations go directly to PostgreSQL, handle alerts, evict client caches on deletion, and update test assertions in unit tests. | M1, M2 | PLANNED |
+| 4 | Final: 100% E2E Test Suite & Adversarial Coverage Hardening | Run and verify 100% pass on E2E test suites (Tiers 1-4) and Tier 5 adversarial hardening with Challenger / Auditor verification. | M1, M2, M3 | PLANNED |
 
 ## Interface Contracts
-### Admin Portal ↔ API Gateway
-- `POST /api/modules`: Accepts single `PrepPulseModule`, array `PrepPulseModule[]`, or `{ modules: PrepPulseModule[] }`. Returns HTTP 201 `{ success: true, count: number, modules: PrepPulseModule[] }`.
-- `DELETE /api/modules?moduleId=<id>`: Deletes module by ID. Returns HTTP 200 `{ success: true, moduleId: string, deleted: boolean }`.
-- `GET /api/modules`: Returns `{ success: true, count: number, modules: PrepPulseModule[] }`.
+### `lib/supabase/admin.ts`
+- Exports `createAdminClient(): SupabaseClient`
+- Uses `process.env.NEXT_PUBLIC_SUPABASE_URL` and `process.env.SUPABASE_SERVICE_ROLE_KEY`
+- Configured with `{ auth: { persistSession: false, autoRefreshToken: false } }`
 
-### Admin Auth ↔ Admin Portal
-- Passcode cookie: `preppulse_admin_token` verified on `/admin` requests or via middleware/API check.
-- Valid passcode: env `ADMIN_PASSCODE` (defaulting to `preppulse-admin-2026` or `admin123`).
+### `app/api/modules/route.ts`
+- `GET(request: NextRequest)`:
+  - Query: optional `?type=quiz|exam`, `?course=...`
+  - Response: `{ success: true, count: number, modules: PrepPulseModule[] }` (200 OK)
+- `POST(request: NextRequest)`:
+  - Body: `PrepPulseModule | PrepPulseModule[] | { modules: PrepPulseModule[] }`
+  - Response: `{ success: true, count: number, modules: PrepPulseModule[] }` (201 Created) or `{ error: string, details?: any }` (400 / 500)
+- `DELETE(request: NextRequest)`:
+  - Query: `?moduleId=...`
+  - Response: `{ success: true, moduleId: string, deleted: boolean }` (200 OK) or `{ error: string }` (400 / 500)
 
-### Learner Flow ↔ Player Engines
-- Quiz start: `<Link href={/quiz/${module.moduleId}}>` with direct launch into `RapidCheckpointQuiz`.
-- Exam start: `<Link href={/exam/${module.moduleId}}>` with direct launch into `MockExamSimulator`.
-- Results / History: `/history` accessing `/api/sessions` or `localStorage.preppulse_guest_session_*`.
+### `app/api/modules/[moduleId]/route.ts`
+- `GET(request: NextRequest, { params })`:
+  - Path param: `moduleId`
+  - Response: `{ success: true, module: PrepPulseModule }` (200 OK) or `{ error: "Module '...' not found" }` (404 Not Found)
 
 ## Code Layout
-```
-app/
-  page.tsx                         # Streamlined Course Library & Learner Home (R3)
-  layout.tsx                       # Global Root Layout
-  (dashboard)/
-    history/page.tsx               # Session history viewer
-    dashboard/page.tsx             # Redirect to / or alias for Course Library
-    create/page.tsx                # Redirect to /admin
-  admin/
-    page.tsx                       # Dedicated Admin Upload & Management Portal (R2)
-    login/page.tsx                 # Passcode-protected Admin Login (R2)
-    actions.ts                     # Admin passcode login/logout server actions
-  (player)/
-    quiz/[moduleId]/page.tsx       # Rapid Checkpoint Quiz Engine (R4 preserved)
-    exam/[moduleId]/page.tsx       # Mock Exam Simulator Engine (R4 preserved)
-    results/[sessionId]/page.tsx   # Diagnostic Scorecard & Remediation Report
-  api/
-    modules/route.ts               # Centralized Module Persistence Gateway (R1)
-    modules/[moduleId]/route.ts    # Single module retrieval
-    upload/route.ts                # PDF/TXT document text extraction
-    generate-module/route.ts       # AI module generator
-    sessions/route.ts              # Test session attempt logger
-components/
-  dashboard/                       # Learner catalog components (Course card, Quiz vs Exam lists)
-  admin/                           # Admin tools (JsonFileUpload, JsonModuleEditor, PdfDropzone, ModuleManager)
-  layout/                          # Header (Logo, History, Admin link), Footer
-lib/
-  schema.ts                        # Zod schemas (Module, Question, Config, Diagnostics)
-  demo-modules.ts                  # Static demo modules
-  guest-session.ts                 # LocalStorage & offline resilience sync
-  quiz/                            # Quiz engine hooks & logic
-  exam/                            # Exam engine hooks & logic
-  diagnostics/                     # Scoring & remediation calculation
-```
+- `lib/supabase/admin.ts`: Admin Supabase client using Service Role key
+- `app/api/modules/route.ts`: API route for modules listing, creation, deletion
+- `app/api/modules/[moduleId]/route.ts`: API route for single module lookup
+- `app/page.tsx`: Learner home / catalog
+- `app/admin/page.tsx`: Admin console
+- `app/(player)/quiz/[moduleId]/page.tsx`: Quiz player with 404 handling
+- `app/(player)/exam/[moduleId]/page.tsx`: Exam player with 404 handling
+- `app/(player)/results/[sessionId]/page.tsx`: Results page
+- `tests/unit/`: Vitest unit tests
+- `tests/e2e/`: Tiered E2E test suites (Tiers 1-5)
