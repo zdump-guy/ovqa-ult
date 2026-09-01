@@ -72,9 +72,9 @@ export default function HistoryPage() {
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <Link
-              href="/dashboard"
+              href="/"
               className="p-2 rounded-xl text-neutral-400 hover:text-white hover:bg-[#111111] transition-colors"
-              title="Return to Dashboard"
+              title="Return to Learner Library"
             >
               <ArrowLeft className="w-5 h-5" />
             </Link>
@@ -87,11 +87,11 @@ export default function HistoryPage() {
           </div>
 
           <Link
-            href="/dashboard"
+            href="/"
             className="px-3.5 py-2 rounded-xl bg-white text-black font-bold text-xs hover:bg-neutral-200 transition-all flex items-center gap-1.5"
           >
             <LayoutDashboard className="w-3.5 h-3.5" />
-            <span>Dashboard</span>
+            <span>Library</span>
           </Link>
         </div>
       </header>
@@ -115,7 +115,7 @@ export default function HistoryPage() {
               You haven&apos;t completed any quiz checkpoints or mock exams yet. Start a session to view diagnostic analytics here.
             </p>
             <Link
-              href="/dashboard"
+              href="/"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white text-black font-bold text-xs hover:bg-neutral-200 transition-all"
             >
               <span>Explore Modules</span>

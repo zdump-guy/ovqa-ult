@@ -39,7 +39,6 @@ export function ModuleCard({
 
   const handleCardClick = (e: React.MouseEvent) => {
     if (isManageMode && !isProtected && onToggleSelect && moduleId) {
-      // If clicking card in manage mode, toggle selection unless clicking link/button
       const target = e.target as HTMLElement;
       if (target.closest("button") || target.closest("a")) return;
       onToggleSelect(moduleId);
@@ -108,29 +107,13 @@ export function ModuleCard({
         </div>
       )}
 
-      {/* Non-manage single delete icon on hover for custom modules */}
-      {!isManageMode && !isProtected && onDelete && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete(module);
-          }}
-          className="absolute top-4 right-4 p-1.5 rounded-lg bg-black/60 border border-transparent hover:border-[#333333] text-neutral-500 hover:text-red-400 hover:bg-red-950/30 transition-all cursor-pointer opacity-0 group-hover:opacity-100"
-          title="Delete Module"
-          aria-label={`Delete module ${module.title}`}
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
-      )}
-
       {/* Card Header & Metadata */}
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2 pr-12">
+        <div className="flex flex-wrap items-center gap-2 pr-4">
           {/* Type Badge */}
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-[#111111] border border-[#333333] text-white font-mono">
             {isQuiz ? <Zap className="w-3 h-3 fill-white text-white" /> : <BookOpen className="w-3 h-3 text-white" />}
-            {isSmartRetry ? "Remediation Quiz" : isQuiz ? "Rapid Quiz" : "Mock Exam"}
+            {isSmartRetry ? "Remediation Quiz" : isQuiz ? "Practice Quiz" : "Simulated Exam"}
           </span>
 
           {/* Course Badge */}
@@ -143,7 +126,7 @@ export function ModuleCard({
             )}
           >
             <GraduationCap className="w-3 h-3 text-neutral-400" />
-            <span className="truncate max-w-[140px]">{courseName || "Unassigned"}</span>
+            <span className="truncate max-w-[140px]">{courseName || "General Studies"}</span>
           </span>
 
           {/* Question Count */}
@@ -168,16 +151,13 @@ export function ModuleCard({
         </p>
       </div>
 
-      {/* Bottom Action Area */}
+      {/* Bottom Action Area: Single Click Direct Launch */}
       <div className="pt-4 border-t border-[#262626] flex items-center gap-2">
         <Link
           href={isQuiz ? `/quiz/${moduleId}` : `/exam/${moduleId}`}
-          className={cn(
-            "flex-1 py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all text-black bg-white hover:bg-neutral-200 active:scale-95",
-            isManageMode && "pointer-events-auto"
-          )}
+          className="flex-1 py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all text-black bg-white hover:bg-neutral-200 active:scale-95 shadow-sm"
         >
-          <span>{isQuiz ? "Start Rapid Quiz" : "Launch Exam"}</span>
+          <span>{isQuiz ? "Start Quiz" : "Start Exam"}</span>
           <ArrowRight className="w-3.5 h-3.5" />
         </Link>
       </div>

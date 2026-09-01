@@ -190,11 +190,11 @@ export default function ResultsPage({ params }: ResultsPageProps) {
             </button>
 
             <Link
-              href="/dashboard"
+              href="/"
               className="px-3.5 py-2 rounded-xl bg-white text-black font-bold text-xs hover:bg-neutral-200 transition-all flex items-center gap-1.5"
             >
               <LayoutDashboard className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Dashboard</span>
+              <span className="hidden sm:inline">Library</span>
             </Link>
           </div>
         </div>
